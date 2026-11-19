@@ -68,15 +68,12 @@ public partial class TabletEngine
     public static string Run(string action, string json)
     {
         var r = JsonSerializer.Deserialize<Request>(json,Json)!;
-        if (r.BannedBonds.Count > 0)
+        if ((action is "placement" or "evaluate") && (r.Banned.Count > 0 || r.BannedBonds.Count > 0))
         {
-            foreach (var op in ops)
-                if (CovenantBanRules.IsExcluded(op, r.BannedBonds)) r.Banned.Add(op.Name);
-            // Surviving members can still activate a partially grey additional covenant.
-            r.BannedBonds.ExceptWith(bonds.Where(b => b.BondType != "SEASON").Select(b => b.Name));
+            var excluded = ops.Where(op => CovenantBanRules.IsExcluded(op, r.BannedBonds))
+                .Select(op => op.Name).ToHashSet();
+            r.Pool.RemoveAll(candidate => r.Banned.Contains(candidate.Name) || excluded.Contains(candidate.Name));
         }
-        if ((action is "placement" or "evaluate") && r.Banned.Count > 0)
-            r.Pool.RemoveAll(candidate => r.Banned.Contains(candidate.Name));
         foreach(var op in ops.Where(o=>o.IsCustom)) op.IsSelectedCustom=r.Custom.Contains(op.Name);
         object result = action switch
         {

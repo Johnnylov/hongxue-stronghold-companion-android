@@ -1,0 +1,21 @@
+.plan-members.recruit-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 114px), 1fr));
+  gap: 5px;
+}
+.plan-member.recruit-member {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: start;
+  min-width: 0;
+  min-height: 54px;
+  padding: 4px;
+  gap: 5px;
+}
+.recruit-member .portrait { flex-shrink: 0; width: 35px; height: 35px; }
+.recruit-info { display: grid; gap: 1px; line-height: 1.22; overflow-wrap: anywhere; }
+.recruit-info strong { font-size: 13px; }
+.recruit-level { color: var(--ink); font-size: 12px; }
+.recruit-member .recruit-info small { color: var(--muted); font-size: 11px; }

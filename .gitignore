@@ -3,6 +3,8 @@
 /engine/obj/
 /tests/DesktopParity/bin/
 /tests/DesktopParity/obj/
+/scripts/BanIndex/bin/
+/scripts/BanIndex/obj/
 /app/src/main/assets/runtime/
 *.jks
 *.keystore

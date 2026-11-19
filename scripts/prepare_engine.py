@@ -10,6 +10,8 @@ root = Path(__file__).resolve().parents[1]
 args = argparse.ArgumentParser()
 args.add_argument("--dotnet", default=os.environ.get("DOTNET_EXE", "dotnet"))
 options = args.parse_args()
+subprocess.run([options.dotnet, "run", "--project", str(root / "scripts/BanIndex"),
+                "-c", "Release", "--", str(root / "app/src/main/assets/rules")], check=True)
 output = root / "build/managed"
 subprocess.run([options.dotnet, "publish", str(root / "engine/TabletEngine.csproj"), "-c", "Release",
                 "-o", str(output), "-p:RestoreSources=https://api.nuget.org/v3/index.json"], check=True)

@@ -442,6 +442,7 @@ const Maps = (() => {
       <span>第 ${db.run.round} 回合 · 终端 ${db.run.terminal} 级${db.run.money == null ? "" : " · 资金 " + esc(db.run.money)}</span>
       ${db.run.round < GuideModel.maxRound ? W.act("map-next-round","下一回合","linkbtn") : ""}</div>
       <div id="map-run-panel" ${db.prefs.mapRunOpen ? "" : "hidden"}>${db.prefs.mapRunOpen ? W.runPanel() : ""}</div></section>
+      <div id="map-next-step">${NextStep.view()}</div>
       <div class="map-head"><img alt="" src="img/${esc(map.id)}.webp"><div><strong>${esc(map.name)}</strong> <span>● 手动</span><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small></div><label class="map-change" aria-label="切换地图">⇄${W.select(
       "map-id",
       W.data.garrison_maps.maps.map((z) => [z.id, z.name]),

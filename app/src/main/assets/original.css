@@ -1128,3 +1128,18 @@ dialog:has(.quick-editor) { width: min(960px,96vw); padding: 16px; }
 }
 .balance-choices .chip { min-width: 0; min-height: 38px; padding: 2px; }
 .balance-choices [aria-pressed="true"] { background: var(--accent); color: var(--on-accent, white); }
+.ban-icon { width: 23px; height: 23px; object-fit: contain; }
+.next-step { background:var(--paper); border:1px solid var(--edge); border-left:4px solid var(--accent); border-radius:8px; padding:9px 12px; margin:8px 0; }
+.next-step h3, .next-step h4, .next-step p { margin:3px 0; }
+.next-step p { line-height:1.45; }
+.round-funding { margin-top:6px; }
+.round-funding summary { cursor:pointer; font-size:14px; }
+.round-funding div { display:grid; grid-template-columns:repeat(auto-fit,minmax(94px,1fr)); gap:4px; margin:6px 0; }
+.round-funding span { padding:4px 6px; border-radius:4px; background:var(--section); font-size:13px; }
+.round-funding b { float:right; }
+.round-funding small { display:block; line-height:1.5; }
+.plan-progression { margin:8px 0; padding:8px 12px; border:1px solid var(--edge); border-radius:8px; background:var(--paper); }
+.plan-progression summary { cursor:pointer; font-weight:600; }
+.plan-progression ol { padding:0; margin:8px 0 0; list-style:none; }
+.plan-progression li { display:grid; grid-template-columns:3em 1fr; gap:6px; margin:5px 0; line-height:1.5; }
+.plan-progression li small { color:var(--muted); }

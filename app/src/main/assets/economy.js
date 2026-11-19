@@ -19,18 +19,33 @@ const Economy = (() => {
       return null;
     return Math.max(0, origin - (run.round - since));
   }
+  function funding(mode, round, data) {
+    if (mode === "mode_training_2" && Number.isInteger(data.tutorialFunding[round]))
+      return {amount:data.tutorialFunding[round], label:"入门协议基础发放"};
+    const sample = data.roundFunding?.[mode];
+    if (Number.isInteger(sample?.amounts[round]))
+      return {amount:sample.amounts[round], label:sample.label};
+    if (round === 1 && Number.isInteger(data.observedFirstRound[mode]))
+      return {amount:data.observedFirstRound[mode], label:"原版首回合画面余额"};
+    return null;
+  }
+  function fundingTable(mode, data) {
+    const rows = [];
+    for (let round = 1; round <= GuideModel.maxRound; round++) {
+      const record = funding(mode, round, data);
+      if (record) rows.push(`<span>第 ${round} 回合 <b>${record.amount}</b></span>`);
+    }
+    const comparison = mode !== "mode_training_2" && mode !== "mode_single_funny" && mode !== "mode_single_1"
+      ? '<small>其他模式对照：规程等级 1 的第 1–8 回合依次发 4–11，第 9–14 回合均发 11。</small>' : "";
+    return `<details class="round-funding"><summary>各回合资金参考</summary>${rows.length ? `<div>${rows.join("")}</div>` : ""}
+      <small>${esc(data.roundFunding?.[mode]?.note || (mode === "mode_training_2" ? "入门协议按客户端教学配置发放。" : rows.length ? "金额取自原版游戏画面。" : "当前模式的基础发放表待核实。"))} 休整期结束时，剩余资金清零。</small>${comparison}</details>`;
+  }
   function view(r, data, W) {
     const initial = data.prices[r.mode]?.[r.terminal - 1],
       computed = price(r, data),
       full = r.terminal >= 6;
-    const tutorial =
-      r.mode === "mode_training_2" ? data.tutorialFunding[r.round] : null;
-    const seen = r.round === 1 ? data.observedFirstRound[r.mode] : null;
-    const example = Number.isInteger(tutorial)
-      ? `本回合基础发放 ${tutorial}`
-      : Number.isInteger(seen)
-        ? `原版第 1 回合实测画面：余额 ${seen}`
-        : "当前余额随购买、出售、刷新和效果变化";
+    const income = funding(r.mode, r.round, data);
+    const example = income ? `${income.label} · ${income.amount} 资金` : "本模式这一回合的发放额待核实，可直接点选手机上的余额。";
     const since = r.terminal === 1 ? 1 : r.levelSince;
     const costNote = full
       ? "终端已满级"
@@ -41,7 +56,7 @@ const Economy = (() => {
       `<button type="button" class="chip" data-w="money-use" data-v="${n}" aria-pressed="${r.money === n}">${n}</button>`).join("");
     return `<div class="eco-grid"><div class="eco-card"><b>资金</b><strong>${Number.isInteger(r.money) ? r.money + " · 当前余额" : "按手机余额选择"}</strong><small>${esc(example)}</small>
       <div class="balance-choices" role="group" aria-label="本局资金">${amounts}</div>
-      <div class="actions">${r.money != null ? W.act("money-use", "清除余额", "linkbtn") : ""}${Number.isInteger(tutorial) || Number.isInteger(seen) ? W.act("money-use", "采用 " + (tutorial ?? seen), "linkbtn", String(tutorial ?? seen)) : ""}</div></div>
+      <div class="actions">${r.money != null ? W.act("money-use", "清除余额", "linkbtn") : ""}${income ? W.act("money-use", "采用 " + income.amount, "linkbtn", String(income.amount)) : ""}</div>${fundingTable(r.mode,data)}</div>
       <div class="eco-card"><b>升级价</b><strong>${full ? "已满级" : computed === null ? "选择升到本级的回合" : computed + " 资金"}</strong><small>${esc(costNote)}</small>
       ${!full && r.terminal > 1 ? W.control("升至当前等级的回合", W.select("run-levelSince", [["", "请选择"], ...Array.from({ length: r.round }, (_, i) => i + 1)], since || "")) : ""}
       ${full ? "" : `<details><summary>按游戏画面修正价格</summary><input id="run-upgrade" aria-label="本次实际升级价" type="number" min="0" max="${Math.max(20, initial || 0, r.upgrade || 0)}" value="${r.upgrade ?? ""}">${W.act("price-auto", "恢复规则计算", "linkbtn")}</details>`}</div></div>`;
@@ -65,5 +80,5 @@ const Economy = (() => {
       if (r.levelSince > r.round) r.levelSince = null;
     }
   }
-  return { price, view, changed, balance };
+  return { price, view, changed, balance, funding };
 })();

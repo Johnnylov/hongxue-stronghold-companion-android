@@ -25,6 +25,8 @@ const Planning = (() => {
     if (req.onlyRun === false) {
       req.banned = [];
       req.bannedBonds = [];
+    } else {
+      req.goals = currentGoals(req.goals);
     }
     return req;
   }
@@ -45,6 +47,7 @@ const Planning = (() => {
     if (outcome && outcome.snapshot !== fingerprint()) invalidate();
     desk.innerHTML =
       W.head("阵容规划") +
+      NextStep.progression() +
       `<div class="segments controls">${W.act("plan-tab", "目标规划", auto ? "" : "chosen", "target")}${W.act("plan-tab", "自动推荐", auto ? "chosen" : "", "auto")}</div>
       <div class="filtergrid">${W.control("上场人数", W.select("plan-people", auto ? [8, 9] : [[0, "全部 · 8 / 9 人"], 8, 9], auto ? p.people || 8 : p.people))}${W.control(
         "规划策略",
@@ -85,7 +88,7 @@ const Planning = (() => {
               W.act("plan-goals", "选择 Ⅰ / Ⅱ 档目标", "linkbtn"),
             ) +
             `<div class="tags">${
-              Object.entries(p.goals)
+              Object.entries(p.onlyRun === false ? p.goals : currentGoals(p.goals))
                 .map(([k, v]) => tag(k + " " + (v === 2 ? "Ⅱ" : "Ⅰ")))
                 .join("") || "<p class='hint'>至少选择一个目标盟约。</p>"
             }</div>`
@@ -94,6 +97,38 @@ const Planning = (() => {
       ${section("必带干员", W.act("plan-lock", "选择干员", "linkbtn"))}<div class="tags">${p.locked.map((n) => tag(n + (W.isBanned(n) ? " · 本局暂停" : ""))).join("") || "<p class='hint'>未指定</p>"}</div>
       <div class="actions controls">${W.act("plan-solve", working ? "正在计算…" : auto ? "推荐主盟约与路线" : "搜索阵容", "btn gold")}${working ? W.act("plan-cancel", "取消计算") : ""}</div>
       <div id="plan-output" aria-live="polite">${err ? `<p class="error">${esc(err)}</p>` : ""}${outcome ? results() : ""}</div>`;
+  }
+  // v1.9.4's ordinary terminal pool admits tiers up to its level. The catalogue
+  // merges both custom slots, and the two strategy grants never use the shop pool.
+  function recruitment(name, terminal = db.run.terminal) {
+    const op = W.rawOps[name];
+    if (!op || !Number.isInteger(op.tier) || op.tier < 1 || op.tier > 6)
+      return {kind:"unknown", tier:null, minTerminal:null, canRoll:null, label:"招募资料待确认", status:""};
+    if (op.requiredStrategyId) {
+      const strategy = W.data.strategies.strategies.find(s => s.id === op.requiredStrategyId);
+      return {kind:"strategy", tier:op.tier, minTerminal:null, canRoll:false,
+        label:(strategy?.name || "策略") + "赠送", status:"第 1 回合获得"};
+    }
+    const known = Number.isInteger(terminal) && terminal >= 1 && terminal <= 6;
+    if (op.isCustom) {
+      const enabled = db.prefs.custom.includes(name);
+      const canRoll = !enabled ? false : !known ? null : terminal < 5 ? false : terminal === 6 ? true : null;
+      const status = !enabled ? "尚未选入自选池" : !known ? "终端待确认"
+        : terminal < 5 ? "本级未开放" : terminal === 5 ? "设在 5 阶才可刷" : "本级可刷";
+      return {kind:"custom", tier:null, minTerminal:5, canRoll, label:"自选 5 / 6 本", status};
+    }
+    const canRoll = known ? terminal >= op.tier : null;
+    return {kind:"shop", tier:op.tier, minTerminal:op.tier, canRoll,
+      label:op.tier + " 本起", status:!known ? "终端待确认" : canRoll ? "本级可刷" : "本级未开放"};
+  }
+  function memberCard(name, transformed, tripleAt) {
+    const recruit = recruitment(name);
+    const status = W.isBanned(name) ? "本局禁用" : recruit.status;
+    return `<button type="button" class="plan-member recruit-member" data-act="item" ${attr("key","op:"+name)}>
+      ${portrait("op:"+name)}<span class="recruit-info"><strong>${esc(name)}</strong>
+      <span class="recruit-level">${esc(recruit.label)}</span><small>${esc(status)}</small>
+      ${tripleAt ? `<small>${esc(tripleAt)} 本三连获取</small>` : ""}
+      ${transformed ? `<small>转 ${esc(transformed)}</small>` : ""}</span></button>`;
   }
   function candidateCard(r, i, auto, rows) {
     const lineup = auto ? r.final : r,
@@ -110,8 +145,6 @@ const Planning = (() => {
       auto && W.data.covenant_icons[r.mainCovenant]
         ? `<img alt="" class="covenant-emblem" src="${esc(W.data.covenant_icons[r.mainCovenant])}">`
         : "";
-    const unit = (o) =>
-      `<button class="plan-member" data-act="item" ${attr("key", "op:" + o.name)}>${portrait("op:" + o.name)}<span>${esc(o.name)}</span>${o.transformedCovenant ? `<small>转 ${esc(o.transformedCovenant)}</small>` : ""}</button>`;
     const members = [...lineup.operators];
     if (lineup.hasPith && !members.some((o) => o.name === "盟约·辅助干员"))
       members.push({ name: "盟约·辅助干员" });
@@ -121,7 +154,7 @@ const Planning = (() => {
     const styleBar = auto
       ? `<div class="style-choices" role="radiogroup" aria-label="${esc(title)}的打法">${["先小后大", "先大后小"].map((name, n) => `<button role="radio" aria-checked="${selected && choice.style === n}" data-w="plan-route" data-v="${i}/${n}"><b aria-hidden="true">${selected && choice.style === n ? "●" : "○"}</b> ${name}${r.recommendedStyle === n ? "<small>推荐</small>" : ""}</button>`).join("")}</div>`
       : W.act("plan-route", "查看道中路线", "btn light", i + "/0");
-    return `${heading}<article class="planrow"><div class="plan-title">${emblem}<h3>${esc(title)}</h3></div><div class="plan-members">${members.map(unit).join("")}</div>
+    return `${heading}<article class="planrow"><div class="plan-title">${emblem}<h3>${esc(title)}</h3></div><div class="plan-members recruit-members">${members.map(o=>memberCard(o.name,o.transformedCovenant)).join("")}</div>
     <p class="hint">${esc([lineup.hasPith ? "优等生 Pith" : "", ...(lineup.mechCovenants || []), lineup.missingHealer ? "缺少奶位" : "", lineup.freeSlots ? "空位 " + lineup.freeSlots : "", auto ? r.styleReason : ""].filter(Boolean).join(" · "))}</p>${styleBar}
     ${selected ? (display ? routeHtml(display) : working ? "<p class='hint'>正在生成所选路线…</p>" : "") : ""}</article>`;
   }
@@ -129,7 +162,7 @@ const Planning = (() => {
     const { value, auto } = outcome,
       rows = auto ? value.candidates : value.plans;
     return (
-      section(auto ? "候选主盟约" : "候选阵容") +
+      section(auto ? "候选主盟约" : "候选阵容", `<small class="hint">本局终端 ${esc(db.run.terminal)} 本</small>`) +
       (value.limited || value.searchLimited
         ? `<p class="hint">已到搜索上限，以下为当前找到的候选。</p>`
         : "") +
@@ -142,7 +175,12 @@ const Planning = (() => {
     );
   }
   function routeHtml(g) {
-    return `<article id="route-result">${section(g.title, W.act("plan-save", "保存并追踪", "btn gold"))}${g.stages.map((s) => `<details class="note"><summary>${esc(GuideModel.stageText(s))} · ${s.entries.filter((e) => e.key.startsWith("op:")).length} 人</summary><p>${esc(s.note)}</p><p>${esc(s.entries.map((e) => info(e.key).name).join("、"))}</p></details>`).join("")}</article>`;
+    return `<article id="route-result">${section(g.title, W.act("plan-save", "保存并追踪", "btn gold"))}${g.stages.map(s => {
+      const units = s.entries.filter(e => e.key.startsWith("op:"));
+      return `<details class="note"><summary>${esc(GuideModel.stageText(s))} · ${s.terminalLevel} 本 · ${units.length} 人</summary>
+        <div class="plan-members recruit-members">${units.map(e => memberCard(e.key.slice(3), e.transformedCovenant, e.viaTriple && s.terminalLevel)).join("")}</div>
+        <p>${esc(s.note)}</p></details>`;
+    }).join("")}</article>`;
   }
   async function click(a, v) {
     const p = state();
@@ -184,7 +222,7 @@ const Planning = (() => {
         invalidate();
         persist();
         render();
-      });
+      }, p.onlyRun !== false);
       return;
     }
     if (a === "plan-save" && display) {
@@ -197,7 +235,7 @@ const Planning = (() => {
       automatic = p.kind === "auto",
       snap = fingerprint();
     const ticket = ++task;
-    if (a === "plan-solve" && !automatic && !Object.keys(p.goals).length) {
+    if (a === "plan-solve" && !automatic && !Object.keys(req.goals).length) {
       toast("请先选择目标盟约");
       return;
     }
@@ -256,11 +294,14 @@ const Planning = (() => {
                   .filter(Boolean)
                   .join(" · "),
                 role: o.role === 1 ? "过渡" : "最终",
+                viaTriple: !!o.viaTriple,
+                transformedCovenant: o.transformedCovenant || null,
                 equipment: gear ? ["变形同构体", gear] : [],
               };
             });
           return {
             label: s.definition.name,
+            terminalLevel: s.definition.terminalLevel,
             start: 3 * i + 1,
             end: s.isFinal
               ? GuideModel.maxRound
@@ -316,13 +357,35 @@ const Planning = (() => {
       }
     }
   }
-  function chooseGoals(old, save) {
+  const peopleSecond = ["精准", "坚守", "助力", "不屈", "聚合", "奥术"];
+  function runGoalLevel(c, level) {
+    if (!level || !db.run.bannedBonds.includes(c.name)) return level;
+    if (c.bondType === "SEASON") return 0;
+    const available = W.availableHolders(c.name);
+    if (available < (c.activateCount ?? 2)) return 0;
+    return level === 2 && (!peopleSecond.includes(c.name) || available < 3) ? 1 : level;
+  }
+  function currentGoals(goals) {
+    return Object.fromEntries(W.data.covenants.covenants.filter(c => goals[c.name])
+      .map(c => [c.name, runGoalLevel(c, goals[c.name])]).filter(([, level]) => level));
+  }
+  function chooseGoals(old, save, useRun = false) {
     const cov = W.data.covenants.covenants.filter((c) => c.name !== "绝技"),
-      single = ["独行", "协防干员", "远见", "奇迹", "调和"],
-      manual = ["精准", "坚守", "助力", "不屈", "聚合", "奥术"];
-    popup(
-      `<h2>目标盟约</h2><p class="hint">Ⅱ档带 * 的盟约还需人工核对层数或精锐条件。</p><div class="filtergrid">${cov.map((c, i) => W.control(c.name, W.select("goal-" + i, [[0, "未指定"], [1, "Ⅰ"], ...(single.includes(c.name) ? [] : [[2, c.bondType === "SEASON" || manual.includes(c.name) ? "Ⅱ" : "Ⅱ *"]])], old[c.name] || 0))).join("")}</div><button id="goals-ok" class="btn gold">保存目标</button>`,
-    );
+      single = ["独行", "协防干员", "调和"];
+    function setting(c, i) {
+      const grey = useRun && db.run.bannedBonds.includes(c.name);
+      const core = c.bondType === "SEASON";
+      const options = [[0, "未指定"]];
+      const maxLevel = useRun ? runGoalLevel(c, 2) : 2;
+      if (maxLevel > 0) {
+        options.push([1, "Ⅰ"]);
+        if (!single.includes(c.name) && maxLevel === 2)
+          options.push([2, core || peopleSecond.includes(c.name) ? "Ⅱ" : "Ⅱ *"]);
+      }
+      const label = c.name + (grey ? core ? " · 本局已禁" : " · 剩 " + W.availableHolders(c.name) + " 名原生干员" : "");
+      return W.control(label, W.select("goal-" + i, options, Math.min(old[c.name] || 0, options.at(-1)[0])));
+    }
+    popup(`<h2>目标盟约</h2><p class="hint">Ⅱ档带 * 的盟约还需人工核对层数或精锐条件。</p><div class="filtergrid">${cov.map(setting).join("")}</div><button id="goals-ok" class="btn gold">保存目标</button>`);
     $("goals-ok").onclick = () => {
       const vals = Object.fromEntries(
         cov
@@ -346,5 +409,5 @@ const Planning = (() => {
     persist();
     render();
   });
-  return { render, click, chooseGoals };
+  return { render, click, chooseGoals, recruitment };
 })();

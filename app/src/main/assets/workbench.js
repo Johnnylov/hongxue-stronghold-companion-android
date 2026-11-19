@@ -3,6 +3,7 @@ const Workbench = (() => {
   const files = [
     "operators",
     "custom_operators",
+    "ban_index",
     "operator_profiles",
     "custom_operator_profiles",
     "covenants",
@@ -165,21 +166,28 @@ const Workbench = (() => {
     if (!op) return false;
     return (
       db.run.banned.includes(name) ||
-      bannedByBonds(op, db.run.bannedBonds)
+      bannedByBonds(name, db.run.bannedBonds)
     );
   }
-  function bannedByBonds(op, bonds) {
-    return op.coreCovenants.some(b => bonds.includes(b)) ||
-      (op.additionalCovenants.length > 0 && op.additionalCovenants.every(b => bonds.includes(b)));
+  function bannedByBonds(name, selected) {
+    if (!selected.length) return false;
+    const rule = data.ban_index[name];
+    const mask = rule.bonds.reduce((bits, bond, i) => selected.includes(bond) ? bits | (1 << i) : bits, 0);
+    return rule.excluded[mask];
   }
   function coreBanned(bond) {
     return db.run.bannedBonds.includes(bond) && data.covenants.covenants.some(b => b.name === bond && b.bondType === "SEASON");
   }
+  function availableHolders(bond) {
+    return Object.values(rawOps).filter(op => !op.requiredStrategyId &&
+      (!op.isCustom || db.prefs.custom.includes(op.name)) && !isBanned(op.name) &&
+      (op.coreCovenants.includes(bond) || op.additionalCovenants.includes(bond))).length;
+  }
   function banBondsDialog() {
     const group = (core, label) => `<fieldset class="training-enemies"><legend>${label}</legend><div>${data.covenants.covenants
       .filter(b => (b.bondType === "SEASON") === core)
-      .map(b => `<label><input type="checkbox" name="ban-covenant" value="${esc(b.name)}" ${db.run.bannedBonds.includes(b.name) ? "checked" : ""}>${esc(b.name)}</label>`).join("")}</div></fieldset>`;
-    popup(`<h2>本局置灰盟约</h2>${group(true,"大盟约 · 成员全部禁用")}${group(false,"小盟约 · 所有附加盟约都置灰的干员禁用")}
+      .map(b => `<label><input type="checkbox" name="ban-covenant" value="${esc(b.name)}" ${db.run.bannedBonds.includes(b.name) ? "checked" : ""}>${data.covenant_icons[b.name] ? `<img class="ban-icon" alt="" src="${esc(data.covenant_icons[b.name])}">` : ""}${esc(b.name)}</label>`).join("")}</div></fieldset>`;
+    popup(`<h2>本局置灰盟约</h2><p class="hint">对照游戏的「本局信息」，勾选灰色图标。只勾画面中已置灰的盟约。</p>${group(true,"核心盟约")}${group(false,"附加盟约")}
       <details><summary id="ban-rule-total"></summary><p id="ban-rule-names"></p></details>
       <div class="actions">${act("ban-bonds-save","应用本局禁用","btn gold")}${button("cancel","取消","btn light")}</div>`);
     previewBans();
@@ -189,7 +197,7 @@ const Workbench = (() => {
   }
   function previewBans() {
     const selected = selectedBans();
-    const names = Object.values(rawOps).filter(op=>bannedByBonds(op, selected)).map(op=>op.name);
+    const names = Object.keys(rawOps).filter(name=>bannedByBonds(name, selected));
     $("ban-rule-total").textContent = "按盟约禁用 " + names.length + " 名干员";
     $("ban-rule-names").textContent = names.join("、") || "无";
   }
@@ -883,6 +891,7 @@ const Workbench = (() => {
     opChoices,
     isBanned,
     coreBanned,
+    availableHolders,
     head,
     applyTheme,
     ownedDialog,

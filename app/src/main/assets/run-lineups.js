@@ -253,5 +253,6 @@ const RunLineups = (() => {
       move(destination, destination === "teams" ? guide.id : null);
     } else incorporate(guide, index, [...tokens], destination);
   }
-  return { view, follow, preview, retryField, computeTarget };
+  function bestMatch() { return matches(roster())[0] || null; }
+  return { view, follow, preview, retryField, computeTarget, bestMatch };
 })();

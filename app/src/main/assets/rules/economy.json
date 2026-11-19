@@ -193,6 +193,38 @@
     "3": 10,
     "4": 10
   },
+  "roundFunding": {
+    "mode_single_funny": {
+      "label": "极速模拟基础参考",
+      "amounts": [null, 6, 7, 8, 9, 10, 11, 11, 11, 11],
+      "note": "两局极速实录逐轮核对。额外奖励会改变实发，例如远见跨过 10 层时另获 2 资金。",
+      "sources": ["https://www.bilibili.com/video/BV1MyWn6TEBq/?t=280", "https://www.bilibili.com/video/BV1dsWX6uEQy/?t=159"]
+    },
+    "mode_single_1": {
+      "label": "规程等级 1 基础参考",
+      "amounts": [null, 4, 5, 6, 7, 8, 9, 10, 11, 11, 11, 11, 11, 11, 11],
+      "note": "取自同一局 14 轮通关实录的回合发放弹板，已对照消费前余额。",
+      "sources": ["https://www.bilibili.com/video/BV1fnWn6QEf9/?t=107"]
+    },
+    "mode_single_17": {
+      "label": "规程等级 17 实战参考",
+      "amounts": [null, 4, 5, 6, 7, null, 9, 10, 11, 11, null, 11],
+      "note": "仅列录像实领与规程等级 1 基础参考吻合的回合。其他回合未能独立分离额外收益。",
+      "sources": ["https://www.bilibili.com/video/BV1sSW869Eis/?t=58"]
+    },
+    "mode_single_20": {
+      "label": "规程等级 20 实战参考",
+      "amounts": [null, 4, 5, 6, null, null, 9, 10, 11, 11, null, 11, 11, 11, 11, 11],
+      "note": "对照两局等级 20 录像，仅列实领与等级 1 基础参考吻合的回合。第 16 回合待核实。",
+      "sources": ["https://www.bilibili.com/video/BV12ZWP6pE7m/?t=14", "https://www.bilibili.com/video/BV1LtsL6iEUd/?t=61"]
+    },
+    "mode_multi_abyss": {
+      "label": "终极模拟开局发放参考",
+      "amounts": [null, 4, 5, 6],
+      "note": "已核对前三轮发放弹板。后续回合的实领含局内额外收入。",
+      "sources": ["https://www.bilibili.com/video/BV1hmWL6fEmQ/?t=161"]
+    }
+  },
   "observedFirstRound": {
     "mode_single_1": 4,
     "mode_single_7": 4,

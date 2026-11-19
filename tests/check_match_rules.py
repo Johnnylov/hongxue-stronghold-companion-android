@@ -47,6 +47,15 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     assert balance.all_text_contents() == [str(n) for n in range(21)]
     expect(balance.nth(20)).to_have_attribute("aria-pressed", "true")
     assert page.evaluate("JSON.parse(localStorage.getItem('hongxue.tablet.v1')).run.money") == 20
+    assert page.evaluate("Array.from({length:9},(_,i)=>Economy.funding('mode_single_funny',i+1,Workbench.data.economy).amount)") == [6,7,8,9,10,11,11,11,11]
+    assert page.evaluate("Array.from({length:14},(_,i)=>Economy.funding('mode_single_1',i+1,Workbench.data.economy).amount)") == [4,5,6,7,8,9,10,11,11,11,11,11,11,11]
+    assert page.evaluate("Economy.funding('mode_multi_abyss',12,Workbench.data.economy)") is None
+    assert page.evaluate("Economy.funding('mode_single_20',15,Workbench.data.economy).amount") == 11
+    assert page.evaluate("Economy.funding('mode_single_20',16,Workbench.data.economy)") is None
+    panel.locator(".round-funding summary").click()
+    expect(panel.locator(".round-funding div > span")).to_have_count(9)
+    panel.get_by_role("button",name="采用 6",exact=True).click()
+    assert page.evaluate("db.run.money") == 6
     expect(page.locator(".board")).to_be_visible()
     assert page.evaluate("[db.page, db.board.source, db.run.counts, db.run.elite]") == [
         "map", "owned", {"蓝毒": 3, "星极": 1}, {"蓝毒": 3, "星极": 1}]
@@ -90,16 +99,16 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
         page.locator('[data-w="ban-bonds-save"]').click()
 
     add_ban("聚合")
-    assert page.evaluate("['瑰盐','华法琳'].map(Workbench.isBanned)") == [True, False]
+    assert page.evaluate("['瑰盐','华法琳'].map(Workbench.isBanned)") == [False, False]
     placed = page.evaluate("""async () => {
-        const pool=['瑰盐','华法琳'].map(name=>({name, copy:0, isElite:false}));
+        const pool=['瑰盐','华法琳','褐果'].map(name=>({name, copy:0, isElite:false}));
         const plan=await Workbench.engine('placement',{map:db.board.map,pool,bannedBonds:db.run.bannedBonds});
         return plan.placed.map(p=>p.key);
     }""")
-    assert placed == ["华法琳"], placed
+    assert set(placed) == {"华法琳", "瑰盐"}, placed
     add_ban("灵巧")
     add_ban("莱塔尼亚")
-    assert page.evaluate("['华法琳','薇薇安娜'].map(Workbench.isBanned)") == [True, True]
+    assert page.evaluate("['华法琳','薇薇安娜'].map(Workbench.isBanned)") == [True, False]
     page.reload()
     expect(panel).to_be_visible()
     expect(panel.locator('[name="training-enemy"]:checked')).to_have_count(2)
