@@ -1,0 +1,201 @@
+{
+  "source": "https://github.com/Kengxxiao/ArknightsGameData/blob/7e560050b03c34661db1d322d008733072352b2a/zh_CN/gamedata/excel/activity_table.json",
+  "season": "act3autochess/V3_1",
+  "field": "shopLevelDataDict[mode][currentLevel].initialUpgradePrice",
+  "refreshCost": 1,
+  "prices": {
+    "mode_single_funny": [
+      1,
+      1,
+      5,
+      8,
+      10
+    ],
+    "mode_multi_funny": [
+      5,
+      8,
+      10,
+      11,
+      11
+    ],
+    "mode_multi_normal": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_multi_hard": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_multi_abyss": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_1": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_2": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_3": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_4": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_5": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_6": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_7": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_8": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_9": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_10": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_11": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_12": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_13": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_14": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_15": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_16": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_17": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_18": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_19": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_single_20": [
+      5,
+      8,
+      11,
+      12,
+      13
+    ],
+    "mode_training_2": [
+      4,
+      4,
+      6,
+      9,
+      12
+    ]
+  },
+  "tutorialFunding": {
+    "1": 3,
+    "2": 9,
+    "3": 10,
+    "4": 10
+  },
+  "observedFirstRound": {
+    "mode_single_1": 4,
+    "mode_single_7": 4,
+    "mode_multi_normal": 4
+  }
+}

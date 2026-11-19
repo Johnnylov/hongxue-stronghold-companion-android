@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+    />
+    <title>鸿雪 · 卫戍手册</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="model.js" defer></script>
+    <link rel="stylesheet" href="workbench.css" />
+    <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="original.css" />
+    <script src="economy.js" defer></script>
+    <script src="workbench.js" defer></script>
+    <script src="maps.js" defer></script>
+    <script src="planning.js" defer></script>
+    <script src="teams.js" defer></script>
+    <script src="app.js" defer></script>
+    <script src="point-controls.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">
+        <img src="img/logo.webp" alt="" />
+        <div><strong>鸿雪</strong><small>卫戍手册</small></div>
+      </div>
+      <nav aria-label="主导航">
+        <button data-act="library">攻略库</button
+        ><button data-act="teams">我的阵容</button>
+        <button data-act="atlas">图鉴</button
+        ><button data-act="planner">规划</button>
+        <button data-act="map">地图模拟</button
+        ><button data-act="run">对局</button>
+        <button data-act="prefs">设置</button>
+      </nav>
+      <button class="about" data-act="about" aria-label="版本与来源">ⓘ</button>
+    </header>
+    <main>
+      <section id="desk" aria-label="攻略和阵容"><p>正在打开手册…</p></section>
+      <aside id="basket" aria-label="购买清单"></aside>
+    </main>
+    <dialog id="dialog">
+      <form method="dialog">
+        <button class="icon-close" aria-label="关闭">×</button>
+      </form>
+      <div id="dialogBody"></div>
+    </dialog>
+    <div id="toast" role="status"></div>
+  </body>
+</html>

@@ -1,0 +1,129 @@
+[
+  {
+    "mapId": "desert_crates",
+    "names": [
+      "\u6DF1\u975B",
+      "\u7470\u76D0",
+      "\u84DD\u6BD2"
+    ],
+    "layout": [
+      {
+        "key": "\u7470\u76D0",
+        "cell": {
+          "col": 1,
+          "row": 2
+        },
+        "facing": 3
+      },
+      {
+        "key": "\u84DD\u6BD2",
+        "cell": {
+          "col": 1,
+          "row": 1
+        },
+        "facing": 0
+      },
+      {
+        "key": "\u6DF1\u975B",
+        "cell": {
+          "col": 2,
+          "row": 0
+        },
+        "facing": 0
+      }
+    ],
+    "total": -80.4,
+    "checks": [
+      "\u4F0A\u6BD4\u5229\u4E9A 3",
+      "\u4E0A\u8DEF\u963B\u6321 1/5",
+      "\u4E0B\u8DEF\u963B\u6321 1/5",
+      "\u5976 \u7470\u76D0"
+    ]
+  },
+  {
+    "mapId": "desert_cactus",
+    "names": [
+      "\u783E",
+      "\u521D\u96EA",
+      "\u4F0A\u6851",
+      "\u534E\u6CD5\u7433",
+      "\u7075\u77E5",
+      "\u8036\u62C9",
+      "\u89D2\u5CF0",
+      "\u950F"
+    ],
+    "layout": [
+      {
+        "key": "\u7075\u77E5",
+        "cell": {
+          "col": 2,
+          "row": 3
+        },
+        "facing": 3
+      },
+      {
+        "key": "\u950F",
+        "cell": {
+          "col": 3,
+          "row": 2
+        },
+        "facing": 3
+      },
+      {
+        "key": "\u89D2\u5CF0",
+        "cell": {
+          "col": 3,
+          "row": 1
+        },
+        "facing": 3
+      },
+      {
+        "key": "\u8036\u62C9",
+        "cell": {
+          "col": 2,
+          "row": 0
+        },
+        "facing": 0
+      },
+      {
+        "key": "\u521D\u96EA",
+        "cell": {
+          "col": 3,
+          "row": 0
+        },
+        "facing": 1
+      },
+      {
+        "key": "\u4F0A\u6851",
+        "cell": {
+          "col": 4,
+          "row": 0
+        },
+        "facing": 0
+      },
+      {
+        "key": "\u783E",
+        "cell": {
+          "col": 5,
+          "row": 0
+        },
+        "facing": 1
+      },
+      {
+        "key": "\u534E\u6CD5\u7433",
+        "cell": {
+          "col": 2,
+          "row": 1
+        },
+        "facing": 0
+      }
+    ],
+    "total": 215.6,
+    "checks": [
+      "\u8C22\u62C9\u683C 5",
+      "\u4E0A\u8DEF\u963B\u6321 1.5/5",
+      "\u4E0B\u8DEF\u963B\u6321 5/5",
+      "\u5976 \u534E\u6CD5\u7433"
+    ]
+  }
+]

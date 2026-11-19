@@ -1,0 +1,12 @@
+/build/
+/engine/bin/
+/engine/obj/
+/tests/DesktopParity/bin/
+/tests/DesktopParity/obj/
+/app/src/main/assets/runtime/
+*.jks
+*.keystore
+*.apk
+*.idsig
+__pycache__/
+.DS_Store

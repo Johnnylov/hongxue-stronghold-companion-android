@@ -1,0 +1,843 @@
+"use strict";
+const Workbench = (() => {
+  const files = [
+    "operators",
+    "custom_operators",
+    "operator_profiles",
+    "custom_operator_profiles",
+    "covenants",
+    "covenant_icons",
+    "economy",
+    "covenant_effects",
+    "equipment",
+    "garrison_maps",
+    "strategies",
+    "bosses",
+    "enemy_types",
+  ];
+  const data = {},
+    profiles = {},
+    rawOps = {};
+  const pages = ["atlas", "planner", "map", "run", "prefs"];
+  let selection,
+    worker,
+    seq = 0,
+    pending = new Map(),
+    atlasKind = "op",
+    atlasFilters = {};
+  const defaults = () => ({
+    banned: [],
+    bannedBonds: [],
+    round: 1,
+    terminal: 1,
+    money: null,
+    upgrade: null,
+    mode: "mode_single_funny",
+    boss: "",
+    enemy: "",
+    elite: {},
+    counts: {},
+    picked: [],
+  });
+  async function initialize() {
+    await Promise.all(
+      files.map(async (name) => {
+        const r = await fetch("rules/" + name + ".json");
+        if (!r.ok) throw Error("无法读取 " + name);
+        data[name] = await r.json();
+      }),
+    );
+    for (const n of ["operators", "custom_operators"])
+      for (const op of data[n].operators) rawOps[op.name] = op;
+    Object.assign(
+      profiles,
+      data.operator_profiles.operators,
+      data.custom_operator_profiles.operators,
+    );
+    db.run = Object.assign(defaults(), db.run);
+    db.run.round = Math.max(
+      1,
+      Math.min(GuideModel.maxRound, Number(db.run.round) || 1),
+    );
+    db.prefs = Object.assign(
+      {
+        dark: false,
+        skin: "closure",
+        multi: false,
+        allStages: false,
+        autoStage: false,
+        zoom: 100,
+        custom: [],
+        tracked: [],
+      },
+      db.prefs,
+    );
+    applyTheme();
+  }
+  function applyTheme() {
+    document.documentElement.dataset.dark = db.prefs.dark ? "1" : "0";
+    document.documentElement.dataset.skin = db.prefs.skin;
+    document.body.style.zoom = String(db.prefs.zoom / 100);
+    const color = getComputedStyle(document.documentElement)
+      .getPropertyValue("--title-bg")
+      .trim()
+      .slice(0, 7);
+    if (window.Tablet?.chromeColor && /^#[0-9a-f]{6}$/i.test(color))
+      Tablet.chromeColor(color);
+  }
+  function engine(action, req) {
+    if (!worker) {
+      worker = new Worker("solver.js", { type: "module" });
+      worker.onmessage = ({ data: m }) => {
+        const p = pending.get(m.id);
+        if (!p) return;
+        pending.delete(m.id);
+        m.error ? p.reject(Error(m.error)) : p.resolve(m.value);
+      };
+      worker.onerror = () => {
+        for (const p of pending.values())
+          p.reject(
+            Error("规划引擎启动失败，请更新 Android System WebView 后重试。"),
+          );
+        pending.clear();
+        worker.terminate();
+        worker = null;
+      };
+    }
+    const id = ++seq;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      worker.postMessage({ id, action, req });
+    });
+  }
+  function request() {
+    return {
+      banned: db.run.banned,
+      bannedBonds: db.run.bannedBonds,
+      custom: db.prefs.custom,
+      terminal: db.run.terminal,
+      round: db.run.round,
+      money: db.run.money,
+      upgrade: Economy.price(db.run, data.economy),
+      owned: Object.keys(db.run.counts).filter((k) => db.run.counts[k] > 0),
+    };
+  }
+  function isBanned(name) {
+    const op = rawOps[name];
+    if (!op) return false;
+    const bonds = op.coreCovenants.length
+      ? op.coreCovenants
+      : op.additionalCovenants;
+    return (
+      db.run.banned.includes(name) ||
+      (bonds.length > 0 && bonds.every((x) => db.run.bannedBonds.includes(x)))
+    );
+  }
+  function act(name, label, cls = "btn light", v = "") {
+    return `<button type="button" class="${cls}" data-w="${esc(name)}" data-v="${esc(v)}">${esc(label)}</button>`;
+  }
+  function select(id, items, value) {
+    return `<select id="${esc(id)}" class="compact-select">${items
+      .map((item) => {
+        const [v, t] = Array.isArray(item) ? item : [item, item];
+        return `<option value="${esc(v)}" ${String(v) === String(value) ? "selected" : ""}>${esc(t)}</option>`;
+      })
+      .join("")}</select>`;
+  }
+  function control(name, content) {
+    return `<label class="field"><span>${esc(name)}</span>${content}</label>`;
+  }
+  function picker(title, options, selected, save, max = 0) {
+    selection = {
+      options: options.map((o) =>
+        typeof o === "string" ? { id: o, name: o } : o,
+      ),
+      values: new Set(selected),
+      operators:
+        options.length > 0 &&
+        options.every(
+          (o) =>
+            typeof o === "object" && o.key?.startsWith("op:") && rawOps[o.name],
+        ),
+      filters: {
+        tier: new Set(),
+        job: new Set(),
+        bond: new Set(),
+        scope: new Set(),
+      },
+      save,
+      max,
+    };
+    popup(
+      `<h2>${esc(title)}</h2><div id="selection-facets"></div><input id="wb-search" class="search" type="search" placeholder="按名称定位"><div class="pickgrid" id="wb-options"></div><div class="actions">${act("selection-save", "应用选择", "btn gold")}${selection.operators ? act("selection-batch", "勾选筛选结果") + act("selection-unfilter", "重置筛选", "linkbtn") : ""}${act("selection-clear", "清空选择", "linkbtn")}<span id="wb-count" class="hint"></span></div>`,
+    );
+    fillOptions();
+  }
+  function fillOptions() {
+    const q = $("wb-search").value.trim().toLowerCase(),
+      f = selection.filters;
+    const activeNames = new Set(
+      active()?.stages.flatMap((s) => s.entries.map((z) => z.key)) || [],
+    );
+    const facets = (label, key, values) =>
+      `<div class="facet-row"><b>${esc(label)}</b><div>${values.map((v) => `<button data-w="selection-facet" data-v="${esc(key + "/" + v)}" aria-pressed="${f[key].has(v)}">${esc(v)}</button>`).join("")}</div></div>`;
+    if (selection.operators) {
+      const bonds = data.covenants.covenants;
+      $("selection-facets").innerHTML =
+        facets("等阶", "tier", ["1阶", "2阶", "3阶", "4阶", "5阶", "6阶"]) +
+        facets("职业", "job", [
+          "先锋",
+          "近卫",
+          "重装",
+          "狙击",
+          "术师",
+          "医疗",
+          "辅助",
+          "特种",
+        ]) +
+        `<details id="selection-bond-panel" ${selection.bondsOpen ? "open" : ""}><summary>盟约筛选${f.bond.size ? " · " + [...f.bond].map(esc).join("、") : ""}</summary>` +
+        facets(
+          "核心",
+          "bond",
+          bonds.filter((c) => c.bondType === "SEASON").map((c) => c.name),
+        ) +
+        facets(
+          "附加",
+          "bond",
+          bonds.filter((c) => c.bondType !== "SEASON").map((c) => c.name),
+        ) +
+        "</details>" +
+        facets("范围", "scope", ["当前阵容", "已选", "本局可用"]);
+    }
+    const filtered = selection.options.filter((o) => {
+      const op = selection.operators ? rawOps[o.name] : null,
+        tags = op ? [...op.coreCovenants, ...op.additionalCovenants] : [];
+      const has = (k, value) => !f[k].size || f[k].has(value);
+      if (
+        op &&
+        (!has("tier", op.tier + "阶") ||
+          !has("job", profiles[o.name]?.profession) ||
+          (f.bond.size && !tags.some((n) => f.bond.has(n))) ||
+          (f.scope.has("当前阵容") && !activeNames.has(o.key)) ||
+          (f.scope.has("已选") && !selection.values.has(o.id)) ||
+          (f.scope.has("本局可用") &&
+            (isBanned(o.name) ||
+              (op.isCustom && !db.prefs.custom.includes(o.name)))))
+      )
+        return false;
+      return [o.name, o.hint, o.initials, ...tags]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+    if (selection.operators)
+      filtered.sort(
+        (a, b) =>
+          rawOps[a.name].tier - rawOps[b.name].tier ||
+          a.name.localeCompare(b.name, "zh-CN"),
+      );
+    selection.visible = filtered;
+    $("wb-options").innerHTML =
+      filtered
+        .map(
+          (o) =>
+            `<button class="pickitem ${selection.values.has(o.id) ? "chosen" : ""}" aria-pressed="${selection.values.has(o.id)}" data-w="selection-toggle" data-v="${esc(o.id)}">${o.key ? portrait(o.key) : ""}<div><strong>${esc(o.name)}</strong><small>${esc(o.hint || "")}</small></div><b>${selection.values.has(o.id) ? "✓" : "＋"}</b></button>`,
+        )
+        .join("") || "<p>没有匹配项</p>";
+    $("wb-count").textContent =
+      `当前 ${filtered.length} 项 · 已选 ${selection.values.size}${selection.max ? " / " + selection.max : ""}`;
+  }
+  function opChoices(names = Object.keys(rawOps)) {
+    return names.map((id) => ({
+      id,
+      name: id,
+      key: "op:" + id,
+      initials: info("op:" + id).initials,
+      hint:
+        (rawOps[id]?.tier || "") + " 阶 · " + (profiles[id]?.profession || ""),
+    }));
+  }
+  function toggleList(a, v) {
+    return a.includes(v) ? a.filter((x) => x !== v) : [...a, v];
+  }
+  function head(title, desc = "") {
+    return `<h1>${esc(title)}</h1>${desc ? `<p class="sub">${esc(desc)}</p>` : ""}`;
+  }
+  function renderPage() {
+    if (!db || !pages.includes(db.page)) return false;
+    if (db.page === "atlas") atlas();
+    if (db.page === "map") Maps.render();
+    if (db.page === "planner") Planning.render();
+    if (db.page === "run") runPage();
+    if (db.page === "prefs") prefs();
+    return true;
+  }
+  function filterState() {
+    return (atlasFilters[atlasKind] ||= {
+      q: "",
+      tiers: [],
+      cores: [],
+      extras: [],
+      trait: "",
+      trigger: "",
+      category: "",
+      type: "",
+      matchAll: false,
+      only: false,
+    });
+  }
+  function atlas() {
+    const f = filterState(),
+      op = atlasKind === "op",
+      all = data.covenants.covenants;
+    const tab = (k, label) =>
+      act("atlas-type", label, k === atlasKind ? "chosen" : "", k);
+    const traits = [
+      ...new Set(
+        Object.values(rawOps).flatMap((o) =>
+          o.normal.traits.map((t) => t.traitType),
+        ),
+      ),
+    ].sort();
+    const triggers = [
+      ...new Set(
+        Object.values(rawOps).flatMap((o) =>
+          o.normal.traits.flatMap((t) =>
+            Array.from(
+              t.traitDescription.matchAll(/<([^@<>][^<>]{0,18})>/g),
+              (m) => m[1],
+            ),
+          ),
+        ),
+      ),
+    ].sort();
+    const categories = [
+      ...new Set(
+        Object.values(catalogue)
+          .filter((i) => i.kind === "eq")
+          .flatMap((i) => i.tags),
+      ),
+    ];
+    desk.innerHTML =
+      head("图鉴") +
+      `<div class="segments controls">${tab("op", "干员")}${tab("eq", "装备")}${tab("bond", "盟约")}${tab("strategy", "策略")}</div><input id="atlas-q" class="search" type="search" value="${esc(f.q)}" placeholder="搜索名称、拼音或关键词">
+      ${
+        ["op", "eq"].includes(atlasKind)
+          ? `<div class="actions">${act("atlas-tiers", "等阶：" + (f.tiers.join(" / ") || "全部"))}${op ? act("atlas-core", "核心盟约：" + (f.cores.join(" / ") || "全部")) + act("atlas-extra", "附加盟约：" + (f.extras.join(" / ") || "全部")) : ""}${act("atlas-reset", "重置", "linkbtn")}</div>
+      <div class="filtergrid">${
+        op
+          ? control("词条", select("atlas-trait", ["", ...traits], f.trait)) +
+            control(
+              "触发时机",
+              select("atlas-trigger", ["", ...triggers], f.trigger),
+            )
+          : control(
+              "功能",
+              select("atlas-category", ["", ...categories], f.category),
+            ) +
+            control(
+              "类型",
+              select("atlas-item-type", ["", "普通", "转职"], f.type),
+            )
+      }</div>
+      ${op ? `<div class="actions"><label><input id="atlas-only" type="checkbox" ${f.only ? "checked" : ""}> 只看本局可用</label><label><input id="atlas-match" type="checkbox" ${f.matchAll ? "checked" : ""}> 满足全部选中盟约</label></div>` : ""}`
+          : ""
+      }
+      <div id="atlas-results"></div>`;
+    atlasResults();
+  }
+  function atlasResults() {
+    const f = filterState(),
+      q = f.q.trim().toLowerCase();
+    if (atlasKind === "bond" || atlasKind === "strategy") {
+      const rows =
+        atlasKind === "bond"
+          ? data.covenants.covenants.map((c) => [
+              c.name,
+              c.bondType === "SEASON" ? "核心盟约" : "附加盟约",
+            ])
+          : data.strategies.strategies.map((s) => [s.name, s.initiator]);
+      $("atlas-results").innerHTML = `<div class="unitgrid controls">${rows
+        .filter((r) => r.join(" ").toLowerCase().includes(q))
+        .map(([n, sub]) => act("reference", n + " · " + sub, "chip", n))
+        .join("")}</div>`;
+      return;
+    }
+    const group = (have, need) =>
+      !need.length ||
+      (f.matchAll
+        ? need.every((s) => have.includes(s))
+        : need.some((s) => have.includes(s)));
+    const rows = Object.entries(catalogue)
+      .filter(([k, t]) => {
+        if (
+          t.kind !== atlasKind ||
+          ![t.name, t.initials, ...t.tags]
+            .join(" ")
+            .toLowerCase()
+            .includes(q) ||
+          (f.tiers.length && !f.tiers.includes(String(t.tier)))
+        )
+          return false;
+        if (atlasKind === "eq") {
+          const change =
+            data.equipment.manualJobChangeEquipments.includes(t.name) ||
+            !!data.covenants.jobChangeEquipmentToCovenant[t.name];
+          return (
+            (!f.category || t.tags.includes(f.category)) &&
+            (!f.type || (f.type === "转职") === change)
+          );
+        }
+        const o = rawOps[t.name];
+        return (
+          (!f.only ||
+            (!isBanned(t.name) &&
+              (!t.custom || db.prefs.custom.includes(t.name)))) &&
+          group(o.coreCovenants, f.cores) &&
+          group(o.additionalCovenants, f.extras) &&
+          (!f.trait || o.normal.traits.some((x) => x.traitType === f.trait)) &&
+          (!f.trigger ||
+            o.normal.traits.some((x) =>
+              x.traitDescription.includes("<" + f.trigger + ">"),
+            ))
+        );
+      })
+      .sort((a, b) => a[1].tier - b[1].tier);
+    $("atlas-results").innerHTML =
+      section(`${rows.length} 项`) +
+      `<div class="unitgrid">${rows.map(([k, t]) => `<button class="unit" data-w="atlas-item" data-v="${esc(k)}">${portrait(k)}${facts({ key: k })}</button>`).join("")}</div>`;
+  }
+  function atlasItem(k) {
+    showItem(k);
+    const t = info(k),
+      p = profiles[t.name];
+    if (p)
+      body.insertAdjacentHTML(
+        "beforeend",
+        `<p class="hint">${identity([p.profession, p.subProfession, p.position, "阻挡 " + p.blockCount])}</p>${p.eliteSkill ? section("精锐技能 · " + p.eliteSkill.name) + `<p>${esc(p.eliteSkill.description)}</p>` : ""}`,
+      );
+    body.insertAdjacentHTML(
+      "beforeend",
+      `<div class="actions">${act("atlas-track", "加入当前阶段清单", "btn gold", k)}${t.kind === "op" ? act("atlas-ban", db.run.banned.includes(t.name) ? "解除本局禁用" : "本局禁用", "btn light", k) : ""}</div>`,
+    );
+  }
+  function prefs() {
+    const p = db.prefs;
+    desk.innerHTML =
+      head("设置") +
+      section("外观") +
+      `<div class="filtergrid">${control(
+        "主题",
+        select(
+          "pref-skin",
+          [
+            ["terminal", "终端"],
+            ["ursus", "乌萨斯齐心团"],
+            ["closure", "可露希尔"],
+          ],
+          p.skin,
+        ),
+      )}${control(
+        "文字与界面缩放",
+        select(
+          "pref-zoom",
+          [85, 90, 100, 110, 120, 130].map((n) => [n, n + "%"]),
+          p.zoom,
+        ),
+      )}</div>
+      <label class="checkline"><input type="checkbox" id="pref-dark" ${p.dark ? "checked" : ""}> 深色模式</label>${section("追踪")}
+      ${[
+        ["multi", "同时追踪多个阵容"],
+        ["allStages", "查看全程需求"],
+        ["autoStage", "按手动录入的回合切换阶段"],
+      ]
+        .map(
+          ([v, n]) =>
+            `<label class="checkline"><input type="checkbox" id="pref-${v}" ${p[v] ? "checked" : ""}> ${n}</label>`,
+        )
+        .join("")}
+      <div class="actions">${act("multi-choose", "选择追踪阵容")}${act("custom", "自选干员（" + p.custom.length + "）")}</div>
+      ${section("移植版")}<div class="actions">${button("about", "版本与来源")}${act("updates", "查看 GitHub 发布版")}${act("backup", "备份 / 恢复本机数据")}</div>`;
+  }
+  function runPage() {
+    const r = db.run,
+      boss = data.bosses.bosses.find((b) => b.name === r.boss),
+      type = data.enemy_types.types[r.enemy],
+      hp = boss?.hp.find((h) => h.mode === r.mode);
+    const modes = [
+      ["mode_training_2", "入门协议"],
+      ...data.bosses.bosses[0].hp.map((h) => [h.mode, h.name]),
+    ];
+    desk.innerHTML =
+      head("对局信息", "手动记录本局状态，禁用选择会同步到图鉴和阵容规划。") +
+      section("回合与商店") +
+      `<div class="filtergrid">
+      ${[
+        ["round", "回合", 1, GuideModel.maxRound],
+        ["terminal", "终端等级", 1, 6],
+      ]
+        .map(([k, n, min, max]) =>
+          control(
+            n,
+            `<input type="number" id="run-${k}" value="${esc(r[k])}" min="${min}" max="${max}">`,
+          ),
+        )
+        .join("")}</div>
+      ${Economy.view(r, data.economy, Workbench)}${section("本局禁用")}<div class="actions">${act("ban-bonds", "禁用盟约 · " + r.bannedBonds.length)}${act("ban-ops", "禁用干员 · " + r.banned.length)}</div><div class="tags controls">${[...r.bannedBonds, ...r.banned].map(tag).join("")}</div>
+      ${section("敌方领袖与特训敌人")}<div class="filtergrid">${control("模式 / 规程等级", select("run-mode", modes, r.mode))}${control("敌方领袖", select("run-boss", [["", "未选择"], ...data.bosses.bosses.map((b) => b.name)], r.boss))}${control("特训敌人类型", select("run-enemy", [["", "未选择"], ...Object.entries(data.enemy_types.types).map(([k, v]) => [k, v.typeName])], r.enemy))}</div>
+      ${boss ? `<article class="note"><strong>${esc(boss.name)}</strong><p>${esc(boss.description)}</p>${hp ? `<h4>${esc(hp.name)} · 生命 ${Number(hp.hp).toLocaleString()}${hp.hiddenHp ? " · 隐藏形态 " + Number(hp.hiddenHp).toLocaleString() : ""}</h4>` : ""}<ul>${boss.abilityList.map((v) => `<li>${esc(v.replace(/<[^>]+>/g, ""))}</li>`).join("")}</ul><details><summary>各难度生命值</summary>${boss.hp.map((h) => `<p>${esc(h.name)}　${h.hp.toLocaleString()}${h.hiddenHp ? " / " + h.hiddenHp.toLocaleString() : ""}</p>`).join("")}</details></article>` : ""}
+      ${type ? section(type.typeName) + ["firstHalfVariants", "secondHalfVariants"].map((k, i) => `<p>${i ? "后半程" : "前半程"} · ${esc(type[k].map((e) => e.enemyName).join("、"))}</p>`).join("") : ""}
+      ${section("干员状态")}<div class="actions">${act("owned", "管理实际拥有池")}${act("new-run", "开始新局", "btn light danger")}</div>`;
+  }
+  function ownedDialog() {
+    popup(
+      `<h2>实际拥有池</h2><div class="actions">${act("owned-choose", "选择拥有的干员")}${act("owned-checklist", "从已购清单补入")}</div><div class="listbox controls">${Object.keys(
+        db.run.counts,
+      )
+        .filter((k) => db.run.counts[k] > 0)
+        .map(
+          (n) =>
+            `<div class="toolbar listrow"><span>${esc(n)} × ${db.run.counts[n]}　精锐 ${db.run.elite[n] || 0}</span><div>${act("qty-minus", "−", "chip", n)}${act("qty-plus", "＋", "chip", n)}${act("elite-change", "调整精锐", "chip", n)}</div></div>`,
+        )
+        .join("")}</div>`,
+    );
+  }
+  async function click(a, v) {
+    if (pages.includes(a)) {
+      if (a === "map" && db.board) db.board.tab = "board";
+      move(a);
+      return;
+    }
+    const f = filterState(),
+      p = db.prefs,
+      r = db.run;
+    if (["money-1", "money+1", "money-use", "price-auto"].includes(a)) {
+      if (a === "price-auto") r.upgrade = null;
+      else
+        r.money =
+          a === "money-use"
+            ? Number(v)
+            : Math.max(
+                0,
+                Math.min(9999, (r.money || 0) + (a === "money-1" ? -1 : 1)),
+              );
+      persist();
+      render();
+      return;
+    }
+    if (a === "selection-facet") {
+      selection.bondsOpen = $("selection-bond-panel")?.open;
+      const [key, value] = v.split("/");
+      const set = selection.filters[key];
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+      fillOptions();
+      return;
+    }
+    if (a === "selection-batch") {
+      const unique = new Set([
+        ...selection.values,
+        ...selection.visible.map((o) => o.id),
+      ]);
+      if (selection.max && unique.size > selection.max) {
+        toast("当前结果超过 " + selection.max + " 项，请继续筛选");
+        return;
+      }
+      selection.values = unique;
+      fillOptions();
+      return;
+    }
+    if (a === "selection-unfilter") {
+      for (const set of Object.values(selection.filters)) set.clear();
+      $("wb-search").value = "";
+      fillOptions();
+      return;
+    }
+    if (a === "selection-toggle") {
+      if (
+        selection.max &&
+        !selection.values.has(v) &&
+        selection.values.size >= selection.max
+      ) {
+        toast("最多选择 " + selection.max + " 项");
+        return;
+      }
+      if (selection.values.has(v)) selection.values.delete(v);
+      else selection.values.add(v);
+      fillOptions();
+      return;
+    }
+    if (a === "selection-clear") {
+      selection.values.clear();
+      fillOptions();
+      return;
+    }
+    if (a === "selection-save") {
+      const fn = selection.save,
+        values = [...selection.values];
+      close();
+      await fn(values);
+      return;
+    }
+    if (a === "atlas-type") {
+      atlasKind = v;
+      atlas();
+      return;
+    }
+    if (a === "atlas-reset") {
+      delete atlasFilters[atlasKind];
+      atlas();
+      return;
+    }
+    if (
+      a.startsWith("atlas-") &&
+      ["tiers", "core", "extra"].includes(a.slice(6))
+    ) {
+      const k = { tiers: "tiers", core: "cores", extra: "extras" }[a.slice(6)];
+      picker(
+        "选择筛选条件",
+        k === "tiers"
+          ? ["1", "2", "3", "4", "5", "6"]
+          : data.covenants.covenants
+              .filter((c) => (c.bondType === "SEASON") === (k === "cores"))
+              .map((c) => c.name),
+        f[k],
+        (vals) => {
+          f[k] = vals;
+          atlas();
+        },
+      );
+      return;
+    }
+    if (a === "atlas-item") {
+      atlasItem(v);
+      return;
+    }
+    if (a === "atlas-track") {
+      let t = active();
+      if (!t)
+        t = incorporate({
+          title: "手动追踪",
+          stages: [{ label: "当前清单", entries: [], note: "" }],
+        });
+      const stage = t.stages[stageNum(t)];
+      if (!stage.entries.some((e) => e.key === v))
+        stage.entries.push({ key: v });
+      persist();
+      close();
+      render();
+      toast("已加入清单");
+      return;
+    }
+    if (a === "atlas-ban") {
+      r.banned = toggleList(r.banned, info(v).name);
+      persist();
+      close();
+      render();
+      return;
+    }
+    if (a === "reference") {
+      const ref = data.strategies.strategies.find((s) => s.name === v);
+      popup(
+        `<h2>${esc(v)}</h2>${ref ? `<p>${esc(ref.initiator)} · 初始生命 ${ref.initialHp}</p><div class="note">${esc(ref.description)}</div><p>${esc(ref.unlockRequirement)}</p>` : (data.covenant_effects.covenants[v] || []).map((x) => `<div class="note"><strong>${esc(x.condition)}</strong><p>${esc(x.text)}</p></div>`).join("")}`,
+      );
+      return;
+    }
+    if (
+      a === "ban-bonds" ||
+      a === "ban-ops" ||
+      a === "custom" ||
+      a === "multi-choose"
+    ) {
+      const opts =
+        a === "ban-bonds"
+          ? data.covenants.covenants.map((c) => c.name)
+          : a === "multi-choose"
+            ? db.teams.map((t) => ({ id: t.id, name: t.title }))
+            : opChoices(
+                a === "custom"
+                  ? Object.keys(rawOps).filter((n) => rawOps[n].isCustom)
+                  : undefined,
+              );
+      const obj = a.startsWith("ban") ? r : p,
+        k = {
+          "ban-bonds": "bannedBonds",
+          "ban-ops": "banned",
+          custom: "custom",
+          "multi-choose": "tracked",
+        }[a];
+      picker(
+        "选择" +
+          {
+            bannedBonds: "禁用盟约",
+            banned: "禁用干员",
+            custom: "自选干员",
+            tracked: "追踪阵容",
+          }[k],
+        opts,
+        obj[k],
+        (vals) => {
+          obj[k] = vals;
+          persist();
+          render();
+        },
+      );
+      return;
+    }
+    if (a === "owned") {
+      ownedDialog();
+      return;
+    }
+    if (a === "owned-choose") {
+      picker(
+        "选择实际拥有的干员",
+        opChoices(),
+        Object.keys(r.counts).filter((n) => r.counts[n] > 0),
+        (vals) => {
+          r.counts = Object.fromEntries(vals.map((n) => [n, r.counts[n] || 1]));
+          for (const n of Object.keys(r.elite))
+            if (!r.counts[n]) delete r.elite[n];
+          persist();
+          ownedDialog();
+        },
+      );
+      return;
+    }
+    if (a === "owned-checklist") {
+      for (const t of db.teams)
+        for (const token of t.owned) {
+          const [k, n] = JSON.parse(token);
+          if (k.startsWith("op:"))
+            r.counts[k.slice(3)] = Math.max(r.counts[k.slice(3)] || 0, n);
+        }
+      persist();
+      ownedDialog();
+      return;
+    }
+    if (["qty-minus", "qty-plus", "elite-change"].includes(a)) {
+      let count = r.counts[v] || 0;
+      if (a === "qty-plus") count = Math.min(9, count + 1);
+      if (a === "qty-minus") count = Math.max(0, count - 1);
+      r.counts[v] = count;
+      r.elite[v] =
+        a === "elite-change"
+          ? ((r.elite[v] || 0) + 1) % (count + 1)
+          : Math.min(r.elite[v] || 0, count);
+      persist();
+      ownedDialog();
+      return;
+    }
+    if (a === "new-run") {
+      popup(
+        `<h2>开始新局？</h2><p>重置本局禁用、商店数值、购买进度和部署。阵容与攻略会保留。</p>${act("new-run-yes", "开始新局", "btn gold")}`,
+      );
+      return;
+    }
+    if (a === "new-run-yes") {
+      db.run = defaults();
+      delete db.board;
+      for (const t of db.teams) {
+        t.owned = [];
+        t.stage = 0;
+      }
+      persist();
+      close();
+      render();
+      return;
+    }
+    if (a === "updates") {
+      location.href =
+        "https://github.com/Johnnylov/hongxue-stronghold-companion-android/releases";
+      return;
+    }
+    if (a === "backup") {
+      Teams.backup();
+      return;
+    }
+    if (a.startsWith("map-")) return Maps.click(a, v);
+    if (a.startsWith("plan-")) return Planning.click(a, v);
+    if (a.startsWith("team-")) return Teams.click(a, v);
+  }
+  document.addEventListener("click", (ev) => {
+    const el = ev.target.closest("[data-w],nav [data-act]");
+    const a = el?.dataset.w || el?.dataset.act;
+    if (db && a && (el.hasAttribute("data-w") || pages.includes(a)))
+      Promise.resolve(click(a, el.dataset.v)).catch((e) => toast(e.message));
+  });
+  document.addEventListener("input", (ev) => {
+    if (!db) return;
+    const e = ev.target;
+    if (e.id === "wb-search") fillOptions();
+    if (e.id === "atlas-q") {
+      filterState().q = e.value;
+      atlasResults();
+    }
+  });
+  document.addEventListener("change", (ev) => {
+    if (!db) return;
+    const e = ev.target,
+      k = e.id.replace(/^.*?-/, "");
+    if (e.id.startsWith("pref-")) {
+      db.prefs[k] =
+        e.type === "checkbox"
+          ? e.checked
+          : k === "zoom"
+            ? Number(e.value)
+            : e.value;
+      applyTheme();
+      persist();
+      render();
+    }
+    if (e.id.startsWith("atlas-") && e.id !== "atlas-q") {
+      const name =
+        { only: "only", match: "matchAll", "item-type": "type" }[k] || k;
+      filterState()[name] = e.type === "checkbox" ? e.checked : e.value;
+      atlasResults();
+    }
+    if (e.id.startsWith("run-")) {
+      if (
+        e.type === "number" &&
+        (!e.checkValidity() || (!e.value && ["round", "terminal"].includes(k)))
+      ) {
+        e.value = db.run[k];
+        return;
+      }
+      db.run[k] =
+        e.type === "number"
+          ? e.value === ""
+            ? null
+            : Number(e.value)
+          : e.value;
+      Economy.changed(db.run, k);
+      if (k === "round" && db.prefs.autoStage) Teams.roundChanged();
+      persist();
+      render();
+    }
+  });
+  function stopEngine() {
+    if (worker) worker.terminate();
+    worker = null;
+    for (const p of pending.values()) p.reject(Error("已取消计算"));
+    pending.clear();
+  }
+  return {
+    initialize,
+    renderPage,
+    data,
+    profiles,
+    rawOps,
+    request,
+    engine,
+    stopEngine,
+    act,
+    select,
+    control,
+    picker,
+    opChoices,
+    isBanned,
+    head,
+    applyTheme,
+    ownedDialog,
+  };
+})();
