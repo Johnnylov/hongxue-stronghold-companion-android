@@ -17,12 +17,10 @@ const Workbench = (() => {
   ];
   const data = {},
     profiles = {},
-    rawOps = {};
+    rawOps = {},
+    equipmentChanges = {};
   const pages = ["atlas", "planner", "map", "run", "prefs"];
   let selection,
-    worker,
-    seq = 0,
-    pending = new Map(),
     atlasKind = "op",
     atlasFilters = {};
   const defaults = () => ({
@@ -40,6 +38,7 @@ const Workbench = (() => {
     picked: [],
   });
   async function initialize() {
+    void engine("warmup", {}).catch(() => {});
     await Promise.all(
       files.map(async (name) => {
         const r = await fetch("rules/" + name + ".json");
@@ -49,6 +48,11 @@ const Workbench = (() => {
     );
     for (const n of ["operators", "custom_operators"])
       for (const op of data[n].operators) rawOps[op.name] = op;
+    for (const item of data.equipment.equipment) {
+      const named = data.covenants.covenants.find(c => c.name && item.name.includes(c.name));
+      if (named || data.equipment.manualJobChangeEquipments.includes(item.name))
+        equipmentChanges[item.name] = data.covenants.jobChangeEquipmentToCovenant[item.name] || named?.name || "";
+    }
     Object.assign(
       profiles,
       data.operator_profiles.operators,
@@ -85,30 +89,56 @@ const Workbench = (() => {
     if (window.Tablet?.chromeColor && /^#[0-9a-f]{6}$/i.test(color))
       Tablet.chromeColor(color);
   }
-  function engine(action, req) {
-    if (!worker) {
-      worker = new Worker("solver.js", { type: "module" });
-      worker.onmessage = ({ data: m }) => {
-        const p = pending.get(m.id);
-        if (!p) return;
-        pending.delete(m.id);
-        m.error ? p.reject(Error(m.error)) : p.resolve(m.value);
-      };
-      worker.onerror = () => {
-        for (const p of pending.values())
-          p.reject(
-            Error("规划引擎启动失败，请更新 Android System WebView 后重试。"),
-          );
-        pending.clear();
-        worker.terminate();
-        worker = null;
-      };
+  function engineWorker() {
+    let worker, seq = 0;
+    const pending = new Map();
+    function stop(message = "已取消计算") {
+      worker?.terminate();
+      worker = null;
+      for (const p of pending.values()) {
+        clearTimeout(p.timer);
+        p.reject(Error(message));
+      }
+      pending.clear();
     }
-    const id = ++seq;
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      worker.postMessage({ id, action, req });
-    });
+    function watchdog(p) {
+      clearTimeout(p.timer);
+      if (p.timed) p.timer = setTimeout(() => stop("计算引擎未响应，请重新点选站位。"), 60000);
+    }
+    function run(action, req, progress) {
+      if (!worker) {
+        const active = new Worker("solver.js", { type: "module" });
+        worker = active;
+        active.onmessage = ({ data: m }) => {
+          const p = pending.get(m.id);
+          if (!p || active !== worker) return;
+          if (m.progress) {
+            watchdog(p);
+            p.progress?.(...m.progress);
+            return;
+          }
+          clearTimeout(p.timer);
+          pending.delete(m.id);
+          m.error ? p.reject(Error(m.error)) : p.resolve(m.value);
+        };
+        active.onerror = active.onmessageerror = () => {
+          if (active === worker) stop("规划引擎加载失败，请重试。");
+        };
+      }
+      const id = ++seq;
+      return new Promise((resolve, reject) => {
+        const p = { resolve, reject, progress, timed: ["placement", "evaluate", "warmup"].includes(action) };
+        pending.set(id, p);
+        watchdog(p);
+        worker.postMessage({ id, action, req });
+      });
+    }
+    return { run, stop };
+  }
+  const plannerWorker = engineWorker(), mapWorker = engineWorker();
+  function engine(action, req, progress) {
+    const target = ["placement", "evaluate", "warmup"].includes(action) ? mapWorker : plannerWorker;
+    return target.run(action, req, progress);
   }
   function request() {
     return {
@@ -153,6 +183,7 @@ const Workbench = (() => {
         typeof o === "string" ? { id: o, name: o } : o,
       ),
       values: new Set(selected),
+      equipment: options.length > 0 && options.every(o => o.key?.startsWith("eq:")),
       operators:
         options.length > 0 &&
         options.every(
@@ -209,10 +240,13 @@ const Workbench = (() => {
         "</details>" +
         facets("范围", "scope", ["当前阵容", "已选", "本局可用"]);
     }
+    if (selection.equipment)
+      $("selection-facets").innerHTML = facets("等阶", "tier", equipmentTiers().map(n => n + "阶"));
     const filtered = selection.options.filter((o) => {
       const op = selection.operators ? rawOps[o.name] : null,
         tags = op ? [...op.coreCovenants, ...op.additionalCovenants] : [];
       const has = (k, value) => !f[k].size || f[k].has(value);
+      if (selection.equipment && !has("tier", info(o.key).tier + "阶")) return false;
       if (
         op &&
         (!has("tier", op.tier + "阶") ||
@@ -238,13 +272,9 @@ const Workbench = (() => {
           a.name.localeCompare(b.name, "zh-CN"),
       );
     selection.visible = filtered;
-    $("wb-options").innerHTML =
-      filtered
-        .map(
-          (o) =>
-            `<button class="pickitem ${selection.values.has(o.id) ? "chosen" : ""}" aria-pressed="${selection.values.has(o.id)}" data-w="selection-toggle" data-v="${esc(o.id)}">${o.key ? portrait(o.key) : ""}<div><strong>${esc(o.name)}</strong><small>${esc(o.hint || "")}</small></div><b>${selection.values.has(o.id) ? "✓" : "＋"}</b></button>`,
-        )
-        .join("") || "<p>没有匹配项</p>";
+    const option = o => `<button class="pickitem ${selection.values.has(o.id) ? "chosen" : ""}" aria-pressed="${selection.values.has(o.id)}" data-w="selection-toggle" data-v="${esc(o.id)}">${o.key ? portrait(o.key) : ""}<div><strong>${esc(o.name)}</strong><small>${esc(o.hint || "")}</small></div><b>${selection.values.has(o.id) ? "✓" : "＋"}</b></button>`;
+    $("wb-options").innerHTML = (selection.equipment ? equipmentGroups(filtered, o => o.key, option)
+      : filtered.map(option).join("")) || "<p>没有匹配项</p>";
     $("wb-count").textContent =
       `当前 ${filtered.length} 项 · 已选 ${selection.values.size}${selection.max ? " / " + selection.max : ""}`;
   }
@@ -324,7 +354,7 @@ const Workbench = (() => {
       `<div class="segments controls">${tab("op", "干员")}${tab("eq", "装备")}${tab("bond", "盟约")}${tab("strategy", "策略")}</div><input id="atlas-q" class="search" type="search" value="${esc(f.q)}" placeholder="搜索名称、拼音或关键词">
       ${
         ["op", "eq"].includes(atlasKind)
-          ? `<div class="actions">${act("atlas-tiers", "等阶：" + (f.tiers.join(" / ") || "全部"))}${op ? act("atlas-core", "核心盟约：" + (f.cores.join(" / ") || "全部")) + act("atlas-extra", "附加盟约：" + (f.extras.join(" / ") || "全部")) : ""}${act("atlas-reset", "重置", "linkbtn")}</div>
+          ? `<div class="actions">${op ? act("atlas-tiers", "等阶：" + (f.tiers.join(" / ") || "全部")) + act("atlas-core", "核心盟约：" + (f.cores.join(" / ") || "全部")) + act("atlas-extra", "附加盟约：" + (f.extras.join(" / ") || "全部")) : equipmentTierButtons(f.tiers, "data-w=\"atlas-eq-tier\"")}${act("atlas-reset", "重置", "linkbtn")}</div>
       <div class="filtergrid">${
         op
           ? control("词条", select("atlas-trait", ["", ...traits], f.trait)) +
@@ -334,11 +364,11 @@ const Workbench = (() => {
             )
           : control(
               "功能",
-              select("atlas-category", ["", ...categories], f.category),
+              select("atlas-category", [["", "全部功能"], ...categories], f.category),
             ) +
             control(
               "类型",
-              select("atlas-item-type", ["", "普通", "转职"], f.type),
+              select("atlas-item-type", [["", "全部类型"], "普通", "转职"], f.type),
             )
       }</div>
       ${op ? `<div class="actions"><label><input id="atlas-only" type="checkbox" ${f.only ? "checked" : ""}> 只看本局可用</label><label><input id="atlas-match" type="checkbox" ${f.matchAll ? "checked" : ""}> 满足全部选中盟约</label></div>` : ""}`
@@ -373,7 +403,7 @@ const Workbench = (() => {
       .filter(([k, t]) => {
         if (
           t.kind !== atlasKind ||
-          ![t.name, t.initials, ...t.tags]
+          ![t.name, t.initials, ...t.tags, ...(t.kind === "eq" ? [t.normal, t.elite, equipmentChanges[t.name]] : [])]
             .join(" ")
             .toLowerCase()
             .includes(q) ||
@@ -381,9 +411,7 @@ const Workbench = (() => {
         )
           return false;
         if (atlasKind === "eq") {
-          const change =
-            data.equipment.manualJobChangeEquipments.includes(t.name) ||
-            !!data.covenants.jobChangeEquipmentToCovenant[t.name];
+          const change = Object.hasOwn(equipmentChanges, t.name);
           return (
             (!f.category || t.tags.includes(f.category)) &&
             (!f.type || (f.type === "转职") === change)
@@ -404,6 +432,12 @@ const Workbench = (() => {
         );
       })
       .sort((a, b) => a[1].tier - b[1].tier);
+    if (atlasKind === "eq") {
+      const card = ([key, item]) => `<button type="button" class="equipment-card" data-w="atlas-item" data-v="${esc(key)}"><span class="equipment-head">${portrait(key)}<span><strong>${esc(item.name)}</strong><small>${identity([...item.tags, equipmentChanges[item.name] && "转职 · " + equipmentChanges[item.name]])}</small></span></span>${equipmentEffects(item)}</button>`;
+      $("atlas-results").innerHTML = section(`${rows.length} 件装备`) +
+        (rows.length ? `<div class="equipment-grid">${equipmentGroups(rows, row => row[0], card)}</div>` : '<p class="hint">没有符合筛选的装备</p>');
+      return;
+    }
     $("atlas-results").innerHTML =
       section(`${rows.length} 项`) +
       `<div class="unitgrid">${rows.map(([k, t]) => `<button class="unit" data-w="atlas-item" data-v="${esc(k)}">${portrait(k)}${facts({ key: k })}</button>`).join("")}</div>`;
@@ -582,6 +616,12 @@ const Workbench = (() => {
     }
     if (a === "atlas-type") {
       atlasKind = v;
+      atlas();
+      return;
+    }
+    if (a === "atlas-eq-tier") {
+      const f = filterState();
+      f.tiers = v ? toggleList(f.tiers, v) : [];
       atlas();
       return;
     }
@@ -815,21 +855,17 @@ const Workbench = (() => {
       render();
     }
   });
-  function stopEngine() {
-    if (worker) worker.terminate();
-    worker = null;
-    for (const p of pending.values()) p.reject(Error("已取消计算"));
-    pending.clear();
-  }
   return {
     initialize,
     renderPage,
     data,
     profiles,
     rawOps,
+    equipmentChanges,
     request,
     engine,
-    stopEngine,
+    stopEngine: plannerWorker.stop,
+    stopMap: mapWorker.stop,
     act,
     select,
     control,

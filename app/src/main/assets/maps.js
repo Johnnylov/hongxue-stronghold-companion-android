@@ -14,7 +14,9 @@ const Maps = (() => {
   }
   let selected = "",
     job = 0,
-    busy = false;
+    busy = false,
+    runningKey = "",
+    status = "";
   const faces = ["→", "↓", "←", "↑"],
     types = {
       G: "地面",
@@ -89,11 +91,10 @@ const Maps = (() => {
       sh.active = [];
     }
     if (!keys.has(selected)) selected = "";
-    job++;
-    busy = false;
     persist();
     render();
     if (keys.size) void calculate("placement");
+    else cancelCalculation();
   }
   function moveTo(key, col, row) {
     const sh = sheet(),
@@ -130,11 +131,24 @@ const Maps = (() => {
     sheet().total = null;
     sheet().checks = [];
     sheet().active = [];
-    job++;
-    busy = false;
     persist();
     render();
     if (Object.keys(sheet().placed).length) void calculate("evaluate");
+    else cancelCalculation();
+  }
+  function cancelCalculation() {
+    if (!busy) return;
+    ++job;
+    busy = false;
+    runningKey = "";
+    W.stopMap();
+    if (db.page === "map") render();
+  }
+  function positions(keys, placed) {
+    return Object.fromEntries(keys.filter(k => placed[k]).map(k => {
+      const { cell, facing } = placed[k];
+      return [k, { cell, facing }];
+    }));
   }
   async function calculate(action) {
     const m = base(),
@@ -144,20 +158,29 @@ const Maps = (() => {
       toast("先加入干员，再推荐站位");
       return;
     }
+    const req = { map: m.map, pool, people: m.people, mode: m.mode, pins: positions(sh.pins, sh.placed) };
+    if (action === "evaluate") req.cells = positions(Object.keys(sh.placed), sh.placed);
+    const key = JSON.stringify(["placement-v1.9.4-1", action, req]);
+    if (busy && runningKey === key) return;
+    cancelCalculation();
+    if (action === "placement" && sh.recommended?.key === key) {
+      const { placed, total, active, checks } = sh.recommended;
+      Object.assign(sh, { placed: clone(placed), total, active, checks, manual: false });
+      persist();
+      render();
+      return;
+    }
     const ticket = ++job;
     busy = true;
+    runningKey = key;
+    status = action === "placement" ? "准备计算…" : "正在评估…";
     render();
     try {
-      const result = await W.engine(action, {
-        ...W.request(),
-        map: m.map,
-        pool,
-        people: m.people,
-        mode: m.mode,
-        pins: Object.fromEntries(
-          sh.pins.filter((k) => sh.placed[k]).map((k) => [k, sh.placed[k]]),
-        ),
-        cells: sh.placed,
+      const result = await W.engine(action, req, (step, total) => {
+        if (ticket !== job) return;
+        status = `搜索站位 ${step}/${total}`;
+        const label = desk.querySelector('[data-w="map-solve"]');
+        if (label) label.textContent = status;
       });
       if (ticket !== job) return;
       sh.placed = Object.fromEntries(
@@ -168,7 +191,8 @@ const Maps = (() => {
       );
       sh.total = result.total;
       if (action === "placement") {
-        sh.recommended = { placed: clone(sh.placed), total: result.total };
+        sh.recommended = { key, placed: clone(sh.placed), total: result.total,
+          active: result.activeCovenants, checks: result.checks };
         sh.manual = false;
       } else {
         sh.manual = true;
@@ -177,10 +201,11 @@ const Maps = (() => {
       sh.checks = result.checks;
       persist();
     } catch (e) {
-      toast("无法计算站位：" + e.message);
+      if (ticket === job) toast("无法计算站位：" + e.message);
     } finally {
       if (ticket === job) {
         busy = false;
+        runningKey = "";
         if (db.page === "map") render();
       }
     }
@@ -387,7 +412,7 @@ const Maps = (() => {
       ${selected ? `<div class="selected-piece"><strong>${esc(selected)}${roles[selectedPiece?.role] ? " · " + roles[selectedPiece.role] : ""}</strong><div class="actions">${selectedPiece ? W.act("map-turn", "转向 " + faces[selectedPiece.facing]) + W.act("map-pin", sh.pins.includes(selected) ? "解除固定" : "固定位置") + W.act("map-bench", "下场") : "<small>点一个可用格子部署</small>"}${W.act("map-deselect", "取消选择", "linkbtn")}</div>${selectedPiece?.notes ? `<p class="hint">${esc(selectedPiece.notes.join(" · "))}</p>` : ""}</div>` : ""}
       <div class="bench-head"><strong>整备区 · ${bench.length} 人</strong><span>上场 ${count} · 已获取 ${new Set(pool.map((p) => p.name)).size} 名</span>${W.act("map-pool", "干员池 ›", "linkbtn")}</div>
       ${bench.length ? `<div class="deploy-roster">${bench.map(card).join("")}</div>` : ""}
-      <div class="deploy-tools actions">${W.act("map-solve", busy ? "计算中…" : "推荐站位", "btn gold")}${W.act("map-team", "使用当前阵容")}${W.act("map-owned", "使用实际拥有池")}${W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
+      <div class="deploy-tools actions">${W.act("map-solve", busy ? status : "推荐站位", "btn gold")}${busy ? W.act("map-cancel", "取消计算", "linkbtn") : ""}${W.act("map-team", "使用当前阵容")}${W.act("map-owned", "使用实际拥有池")}${W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
       ${legend}${sh.manual && sh.recommended && sh.total !== null ? `<div class="actions"><p class="hint">手动摆位 · 较推荐 ${Math.round((sh.total - sh.recommended.total) * 10) / 10}</p>${W.act("map-restore", "恢复推荐站位", "linkbtn")}</div>` : ""}</div>`;
     const cols = bounds.right - bounds.left + 1;
     desk
@@ -398,6 +423,10 @@ const Maps = (() => {
       .style.setProperty("--rows", String(bounds.rows));
   }
   async function click(a, v) {
+    if (a === "map-cancel") {
+      cancelCalculation();
+      return;
+    }
     if (a === "map-restore") {
       await calculate("placement");
       return;
@@ -562,8 +591,12 @@ const Maps = (() => {
     if (el.id === "map-id") {
       m.map = el.value;
       selected = "";
-    } else if (el.id === "map-routes") m.routes = el.checked;
-    else if (el.id === "map-people") {
+    } else if (el.id === "map-routes") {
+      m.routes = el.checked;
+      persist();
+      render();
+      return;
+    } else if (el.id === "map-people") {
       if (Object.keys(sheet().placed).length > Number(el.value)) {
         el.value = m.people;
         toast("请先将一名干员下场");
@@ -572,14 +605,14 @@ const Maps = (() => {
       m.people = Number(el.value);
     } else if (el.id === "map-mode") m.mode = Number(el.value);
     else return;
-    job++;
-    busy = false;
+    cancelCalculation();
     persist();
     render();
-    if (el.id === "map-id" && candidates().length && sheet().total === null)
-      void calculate(
-        Object.keys(sheet().placed).length ? "evaluate" : "placement",
-      );
+    if (candidates().length) {
+      const sh = sheet();
+      const manual = sh.manual ?? (Object.keys(sh.placed).length > 0 && !sh.recommended);
+      void calculate(manual ? "evaluate" : "placement");
+    }
   });
   document.addEventListener("dragstart", (e) => {
     const k = e.target.closest("[data-piece]")?.dataset.piece;

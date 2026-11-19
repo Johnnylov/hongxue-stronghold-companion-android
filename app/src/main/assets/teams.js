@@ -769,6 +769,7 @@ const Teams = (() => {
           name: o.name,
           key: "eq:" + o.name,
           initials: o.initials,
+          hint: [o.tier + " 阶", ...o.tags].join(" · "),
         }));
       const cand = (e.candidates || []).map((c) => c.name),
         base = e.equipment || [],

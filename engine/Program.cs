@@ -16,6 +16,9 @@ public partial class TabletEngine
     private static List<PlannedLineup> lastPlans = [];
     public static void Main() { }
 
+    [JSImport("globalThis.hongxuePlacementProgress")]
+    private static partial void PlacementProgress(int step, int total);
+
     [JSExport]
     public static async Task<string> Initialize(string files)
     {
@@ -104,7 +107,7 @@ public partial class TabletEngine
         var map=boards.Find(r.Map) ?? throw new ArgumentException("地图不存在");
         // Match the desktop DeployView.Options; use the upstream seed, restarts and search budget.
         var options = new PlacementOptions { FieldCount=r.People, Mode=(PlacementMode)r.Mode, Pins=r.Pins };
-        var plan=action=="placement" ? placement.Plan(map,r.Pool,options) :
+        var plan=action=="placement" ? placement.Plan(map,r.Pool,options,progress: PlacementProgress) :
             placement.Evaluate(map,r.Pool,r.Cells.ToDictionary(k=>k.Key,v=>(v.Value.Cell,v.Value.Facing)),options);
         return new {plan.Placed,plan.Bench,plan.ActiveCovenants,plan.Checks,plan.Combat,plan.Stacking,plan.Total};
     }

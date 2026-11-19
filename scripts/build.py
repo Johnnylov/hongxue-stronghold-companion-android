@@ -47,7 +47,7 @@ with zipfile.ZipFile(out / "base.apk") as base, zipfile.ZipFile(out / "unsigned.
         apk.writestr(entry.filename, base.read(entry), compress_type=entry.compress_type)
     apk.write(out / "classes.dex", "classes.dex", compress_type=zipfile.ZIP_DEFLATED)
 run(tools / ("zipalign" + suffix), "-f", "4", out / "unsigned.apk", out / "aligned.apk")
-apk = out / "Hongxue-Tablet-v1.0.0.apk"
+apk = out / "Hongxue-Tablet-v1.0.1.apk"
 signer = [jdk("java"), "-jar", tools / "lib/apksigner.jar"]
 run(*signer, "sign", "--ks", args.keystore, "--ks-key-alias", args.alias,
     "--ks-pass", "env:HX_STORE_PASS", "--key-pass", "env:HX_STORE_PASS",

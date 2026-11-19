@@ -5,11 +5,15 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <PublishTrimmed>false</PublishTrimmed>
+    <PublishTrimmed>true</PublishTrimmed>
+    <RunAOTCompilation>true</RunAOTCompilation>
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
     <BlazorEnableCompression>false</BlazorEnableCompression>
     <WasmEnableWebcil>false</WasmEnableWebcil>
   </PropertyGroup>
   <ItemGroup>
+    <!-- The JSON bridge serializes the upstream model and anonymous result types by reflection. -->
+    <TrimmerRootAssembly Include="TabletEngine" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="8.0.34" />
   </ItemGroup>
 </Project>

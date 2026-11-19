@@ -87,6 +87,30 @@ function info(id) {
 function identity(options) {
   return options.filter(Boolean).map(esc).join(" · ");
 }
+function equipmentTiers() {
+  return [...new Set(Workbench.data.equipment.equipment.map(e => e.tier))].sort((a, b) => a - b);
+}
+function equipmentTierButtons(selected, action) {
+  return `<div class="facet-row equipment-tiers" aria-label="装备等阶"><b>等阶</b><div>${["", ...equipmentTiers().map(String)].map(n =>
+    `<button type="button" ${action} data-v="${n}" aria-pressed="${n ? selected.includes(n) : !selected.length}">${n ? n + " 阶" : "全部"}</button>`).join("")}</div></div>`;
+}
+function equipmentGroups(items, keyOf, card) {
+  const groups = new Map();
+  for (const item of items) {
+    const tier = info(keyOf(item)).tier || 0;
+    if (!groups.has(tier)) groups.set(tier, []);
+    groups.get(tier).push(item);
+  }
+  return [...groups.keys()].sort((a,b) => (a || Infinity) - (b || Infinity)).map(tier => {
+    const entries = groups.get(tier);
+    return `<h3 class="equipment-tier-heading">${tier ? tier + " 阶" : "等阶待定"}<small>${entries.length} 件</small></h3>` + entries.map(card).join("");
+  }).join("");
+}
+function equipmentEffects(item) {
+  return `<span class="equipment-effects"><span><b>普通</b><span>${esc(item.normal)}</span></span>${item.elite
+    ? `<span><b>精锐</b><span>${esc(item.elite)}</span></span>`
+    : '<small>无精锐装备</small>'}</span>`;
+}
 function facts(entry) {
   const item = info(entry.key);
   const labels = entry.labels || [];
@@ -328,6 +352,7 @@ function renderPicker() {
   const cls = (k) => (picker.kind === k ? "chosen" : "");
   popup(`<h2>配置阶段需求</h2><div class="segments">${button("pick-kind", "干员", cls("op"), attr("kind", "op"))}${button("pick-kind", "装备", cls("eq"), attr("kind", "eq"))}</div>
     <input id="pickSearch" class="search" type="search" aria-label="搜索干员或装备" placeholder="搜名称、拼音首字母、盟约或功能" value="${esc(picker.q)}"><div class="toolbar controls"><label><input type="checkbox" id="onlyPicked" ${picker.only ? "checked" : ""}> 只看已选</label><span id="pickCount" class="hint"></span></div>
+    ${picker.kind === "eq" ? equipmentTierButtons(picker.tiers || [], 'data-act="pick-eq-tier"') : ""}
     <div class="pickgrid" id="picks"></div><div class="actions">${button("apply-pick", "保存阶段需求", "btn gold")}${button("cancel", "取消", "btn light")}</div>`);
   fillPicker();
 }
@@ -340,6 +365,7 @@ function fillPicker() {
     const it = info(k);
     return (
       it.kind === picker.kind &&
+      (picker.kind !== "eq" || !picker.tiers?.length || picker.tiers.includes(String(it.tier))) &&
       (!picker.only || counts.has(k)) &&
       [it.name, it.initials, ...it.tags, it.tier && it.tier + "阶"]
         .filter(Boolean)
@@ -354,16 +380,16 @@ function fillPicker() {
       info(a).name.localeCompare(info(b).name, "zh-CN"),
   );
   $("pickCount").textContent = `已选 ${picker.entries.length} 项`;
-  $("picks").innerHTML =
-    candidates
-      .map(
-        (k) =>
-          `<button class="pickitem ${counts.has(k) ? "chosen" : ""}" aria-pressed="${counts.has(k)}" data-act="toggle-pick" ${attr("key", k)}>${portrait(k)}${facts({ key: k })}<b>${counts.has(k) ? "✓" : "＋"}</b></button>`,
-      )
-      .join("") || `<p class="hint">没有匹配项</p>`;
+  const card = k => `<button class="pickitem ${counts.has(k) ? "chosen" : ""}" aria-pressed="${counts.has(k)}" data-act="toggle-pick" ${attr("key", k)}>${portrait(k)}${facts({ key: k })}<b>${counts.has(k) ? "✓" : "＋"}</b></button>`;
+  $("picks").innerHTML = (picker.kind === "eq" ? equipmentGroups(candidates, k => k, card) : candidates.map(card).join("")) || `<p class="hint">没有匹配项</p>`;
 }
 function showItem(k) {
   const t = info(k);
+  if (t.kind === "eq" && catalogue[k]) {
+    const change = Workbench.equipmentChanges[t.name];
+    popup(`<div class="detailshead">${portrait(k)}<div><h2>${esc(t.name)}</h2><p class="hint">${identity([t.tier + " 阶", ...t.tags, change && "转职 · " + change])}</p></div></div>${equipmentEffects(t)}`);
+    return;
+  }
   popup(`<div class="detailshead">${portrait(k)}<div><h2>${esc(t.name)}</h2><p class="hint">${identity([t.tier && t.tier + " 阶", t.custom && "自选干员", t.strategy && "策略专属", ...t.tags])}</p></div></div>
     ${
       [
@@ -422,7 +448,7 @@ function confirmDialog(title, message, action, label) {
   );
 }
 function about() {
-  popup(`<h2>鸿雪 · 卫戍手册</h2><p>Android 平板移植版 1.0.0 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
+  popup(`<h2>鸿雪 · 卫戍手册</h2><p>Android 平板移植版 1.0.1 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
     ${section("本地保存")}<p>阵容与购买进度保存在这台设备。卸载应用或清除应用数据会移除记录。</p>
     <div class="actions">${button("legal", "许可与归属", "btn light")}</div>`);
 }
@@ -508,6 +534,12 @@ document.addEventListener("click", async (ev) => {
   if (a === "pick-kind") {
     picker.kind = b.dataset.kind;
     picker.q = "";
+    renderPicker();
+    return;
+  }
+  if (a === "pick-eq-tier") {
+    const v = b.dataset.v, tiers = picker.tiers || [];
+    picker.tiers = v ? (tiers.includes(v) ? tiers.filter(n => n !== v) : [...tiers, v]) : [];
     renderPicker();
     return;
   }

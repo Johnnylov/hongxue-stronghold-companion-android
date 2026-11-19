@@ -937,3 +937,59 @@ input.search + .point-input {
   font-size: 13px;
   cursor: pointer;
 }
+
+.equipment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
+  gap: 8px;
+  align-content: start;
+}
+.equipment-tier-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 12px 0 0;
+  font-size: 17px;
+  color: var(--ink);
+}
+.equipment-tier-heading small, .equipment-head small, .equipment-effects small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+.equipment-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.equipment-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.equipment-head > span, .equipment-effects {
+  display: grid;
+  gap: 4px;
+}
+.equipment-effects > span {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  line-height: 1.5;
+  font-size: 14px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.equipment-effects b {
+  color: var(--muted);
+  font-size: 13px;
+}

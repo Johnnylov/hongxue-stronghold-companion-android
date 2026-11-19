@@ -11,11 +11,17 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 root = Path(__file__).resolve().parents[1]
-apk = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/Hongxue-Tablet-v1.0.0.apk"
+apk = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/Hongxue-Tablet-v1.0.1.apk"
 cases = json.loads((root / "tests/DesktopParity/reference.json").read_text(encoding="utf-8"))
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
+    def do_GET(self):
+        try:
+            super().do_GET()
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+            # Cancelling a worker aborts its in-flight local asset requests.
+            pass
 class Server(ThreadingHTTPServer):
     request_queue_size = 128
 with tempfile.TemporaryDirectory() as tmp:
@@ -42,5 +48,40 @@ with tempfile.TemporaryDirectory() as tmp:
                 assert [c["text"] for c in result["checks"]] == case["checks"]
                 assert [{k:p[k] for k in ("key","cell","facing")} for p in result["placed"]] == case["layout"]
             print(case["mapId"], "matched all 5 runs", case["total"], flush=True)
+        for case in json.loads((root / "tests/DesktopParity/boards.json").read_text(encoding="utf-8")):
+            result = page.evaluate("(r) => Workbench.engine('placement', r)", case["req"])
+            for ref, actual in (("layout", "placed"), ("bench", "bench"), ("checks", "checks"),
+                                ("combat", "combat"), ("stacking", "stacking"), ("total", "total")):
+                assert case[ref] == result[actual], (case["req"]["map"], ref)
+        print("All ten boards matched the desktop DLL, including notes, pins, copies and elite effects.", flush=True)
+        case = cases[0]
+        page.evaluate("""c => {
+            move('map');
+            Object.assign(db.board, {map:c.mapId, pool:c.names.map(name => ({name, count:1, elite:0})), layouts:{}});
+            Maps.render();
+        }""", case)
+        page.locator('[data-w="map-solve"]').click()
+        page.locator('[data-w="map-cancel"]').wait_for(state="hidden")
+        assert page.evaluate("Boolean(db.board.layouts[db.board.map]?.recommended?.key)")
+        page.reload()
+        page.locator('[data-w="map-solve"]').wait_for()
+        page.evaluate("""() => {
+            const raw = Workbench.engine;
+            window.searchCount = 0;
+            Workbench.engine = (a,...rest) => { if (a === 'placement') searchCount++; return raw(a,...rest); };
+        }""")
+        page.locator('[data-w="map-solve"]').click()
+        assert page.evaluate("searchCount") == 0
+        assert page.evaluate("db.board.layouts[db.board.map].total") == case["total"]
+        # Two rapid switches must drop the obsolete search. Toggling route visibility must keep the latest one.
+        page.evaluate("""() => {
+            document.querySelector('[data-w="map-mode-set"][data-v="0"]').click();
+            document.querySelector('[data-w="map-mode-set"][data-v="2"]').click();
+            document.getElementById('map-routes').click();
+        }""")
+        page.locator('[data-w="map-cancel"]').wait_for(state="hidden")
+        assert page.evaluate("JSON.parse(db.board.layouts[db.board.map].recommended.key)[2].mode") == 2
+        assert page.evaluate("searchCount") == 2
+        print("Persistent reuse and rapid mode switches passed.", flush=True)
         browser.close()
         server.shutdown()

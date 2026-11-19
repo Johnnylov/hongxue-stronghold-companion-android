@@ -10,9 +10,14 @@
 
 本版采用手动录入本局数据。APK 仅声明联网权限，用于读取森空岛攻略或由用户触发阵容链接分享。主要数据与 C# 规划引擎都随包提供，可以离线运行。
 
+## v1.0.1 修复内容
+
+- **地图推荐站位**。预编译原版 C# 搜索引擎，在同一次搜索中复用路线覆盖和盟约计算。搜索显示第几轮，可以取消。切换模式、地图或干员池时取消旧计算，相同条件可直接恢复上次推荐。
+- **装备图鉴**。70 件装备按 1–6 阶分组，可以直接点等阶，再叠加功能和转职筛选。卡片展示普通与精锐的完整数值和触发条件。24 件转职装备标明对应盟约，原版无精锐形态的装备标明「无精锐装备」。配置阶段需求和给干员选装备时也可按等阶勾选。
+
 ## 快速上手
 
-1. 在平板的发布页下载 `Hongxue-Tablet-v1.0.0.apk`，点开安装。如果系统提示，为打开 APK 的浏览器或文件管理器允许“安装未知应用”。
+1. 在平板的发布页下载 `Hongxue-Tablet-v1.0.1.apk`，点开安装。已安装上一版时可以直接覆盖升级，保留本机阵容与清单。如果系统提示，为打开 APK 的浏览器或文件管理器允许“安装未知应用”。
 2. 在「攻略库」打开一份离线参考，也可以直接读取推荐的森空岛攻略，或粘贴一篇卫戍协议详情链接。导入的攻略保存在本机。
 3. 点「复制为我的阵容」，选择当前阶段。在右侧清单勾选已购干员或装备。点「配干员 / 装备」调整需求，点干员可编辑精锐、标签和装备。阶段切换和应用重启均保留勾选。
 4. 在「地图模拟」选图，点「使用当前阵容」或「使用实际拥有池」。点「推荐站位」算出位置与朝向，也可以先选一名干员再点格子摆位。选中已部署干员后可转向、下场或固定，固定的棋子会保留到下一次推荐。
@@ -54,11 +59,11 @@
 
 ## 从源码构建
 
-需要 Python 3.10+、JDK 17、.NET 8 SDK、Android SDK Platform 35 与 Build Tools 35.0.0。设置 `JAVA_HOME` 与 `ANDROID_HOME`，确保 `dotnet` 在 PATH 中，或用 `DOTNET_EXE` 指向 .NET 8 的可执行文件。首次构建需访问 NuGet。仓库已包含运行所需的游戏数据与图片。
+需要 Python 3.10+、JDK 17、.NET 8 SDK、Android SDK Platform 35 与 Build Tools 35.0.0。设置 `JAVA_HOME` 与 `ANDROID_HOME`，确保 `dotnet` 在 PATH 中，或用 `DOTNET_EXE` 指向 .NET 8 的可执行文件。首次构建请运行 `dotnet workload install wasm-tools` 安装 WebAssembly 预编译工具，并确保可访问 NuGet。仓库已包含运行所需的游戏数据与图片。
 
 1. 使用 `keytool -genkeypair -keystore tablet.jks -alias hongxue -keyalg RSA -keysize 3072 -validity 10000` 创建个人签名，密钥和密钥库使用同一个密码。
 2. 在当前终端把密码存入 `HX_STORE_PASS` 环境变量。
-3. 执行 `python scripts/build.py --keystore tablet.jks`。脚本先将 C# 算法编译成 WebAssembly，再打包、对齐、签名并校验 APK。产物位于 `build/Hongxue-Tablet-v1.0.0.apk`，自行构建的签名与发布版不同。
+3. 执行 `python scripts/build.py --keystore tablet.jks`。脚本先将 C# 算法编译成 WebAssembly，再打包、对齐、签名并校验 APK。产物位于 `build/Hongxue-Tablet-v1.0.1.apk`，自行构建的签名与发布版不同。
 
 游戏数据取自固定的上游提交。更新资料时，安装 Pillow 后执行 `python scripts/prepare_data.py <上游仓库目录>`。安装 Python Playwright 和 Chromium 后可运行 `python tests/check_routes.py` 验证全部敌方路线，也可以用 `CHROME_PATH` 指向已安装的 Chrome。
 
@@ -70,4 +75,4 @@
 
 经济数据来自[规程序列 I 客户端配置](https://github.com/Kengxxiao/ArknightsGameData/blob/7e560050b03c34661db1d322d008733072352b2a/zh_CN/gamedata/excel/activity_table.json)，调度中心逐回合降价规则见 [PRTS 操作说明](https://prts.wiki/w/卫戍协议/帮助)。规程等级 1、7 及险境模拟原版首回合测试画面显示余额 4。它是画面观测值。入门协议有逐回合基础发放表，常规对局的实时余额由用户按本局操作校正。
 
-在安装包生成后，可运行 `python tests/check_desktop_parity.py`。该测试从 APK 解出实际随包运行的引擎，与 Windows v1.9.4 发布包 `HongxueCompanion.Core.dll` 计算的两组参考结果比对，每组连续运行五次，校验每名干员的坐标、朝向、校验条与总分。Windows 基准运行器位于 `tests/DesktopParity`。
+在安装包生成后，可运行 `python tests/check_desktop_parity.py`。该测试从 APK 解出实际随包运行的引擎，与 Windows v1.9.4 发布包 `HongxueCompanion.Core.dll` 计算的两组参考结果比对，每组连续运行五次，校验每名干员的坐标、朝向、校验条与总分。另以覆盖全部 10 张地图的 Windows 参考结果核对精锐、同名多份、固定位置、整备区、详细说明和分项得分，并测试重复推荐与连续切换模式。Windows 基准运行器位于 `tests/DesktopParity`。

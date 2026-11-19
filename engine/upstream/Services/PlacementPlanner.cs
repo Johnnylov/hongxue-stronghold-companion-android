@@ -38,7 +38,7 @@ public sealed record PlacementOptions
 /// </list>
 /// 阿戈尔's devour and the snow map's stealth cells are not modelled.
 /// </summary>
-public sealed class PlacementPlanner
+public sealed partial class PlacementPlanner
 {
     private readonly IReadOnlyDictionary<string, Operator> _operators;
     private readonly IReadOnlyDictionary<string, CovenantInfo> _covenants;
@@ -57,10 +57,10 @@ public sealed class PlacementPlanner
 
     /// <summary>Chooses the field operators from <paramref name="pool"/> and arranges them.</summary>
     public PlacementPlan Plan(GarrisonMap map, IReadOnlyList<PlacementCandidate> pool, PlacementOptions options,
-        CancellationToken cancel = default)
+        CancellationToken cancel = default, Action<int, int>? progress = null)
     {
         var job = new Job(this, map, pool, options);
-        var best = job.Solve(cancel);
+        var best = job.Solve(cancel, progress);
         return job.Explain(best);
     }
 
@@ -202,6 +202,7 @@ public sealed class PlacementPlanner
         public required string[] StackCovenants;
         public required double StackPerRound;
         public required double StackAmount;
+        public bool RoundEnd, DependsOnPosition;
     }
 
     private OpInfo? BuildInfo(PlacementCandidate c)
@@ -233,6 +234,8 @@ public sealed class PlacementPlanner
             Tier = op.Tier,
             Healer = p.IsHealer || p.Profession == "医疗",
             Trait = trait,
+            RoundEnd = trait.Contains("休整期结束时"),
+            DependsOnPosition = trait.Contains("同一行") || Regex.IsMatch(trait, @"自身(以|及)?及?身前一格"),
             Cap = cap,
             StacksLayers = !once && Regex.IsMatch(trait, @"层数\+\d|叠加"),
             OnceAmount = once ? Number(OncePattern, trait) : 0,
@@ -280,6 +283,7 @@ public sealed class PlacementPlanner
             }).ToArray();
             Deployable = map.AllCells().Where(c => c.Type is BoardCellType.Ground or BoardCellType.Special or BoardCellType.High)
                 .Select(c => c.Cell).ToArray();
+            mainRoute = Routes.SelectMany(r => r).ToHashSet();
             Special = map.AllCells().Where(c => c.Type == BoardCellType.Special).Select(c => c.Cell).ToHashSet();
             Tile = Tiles.GetValueOrDefault(map.Id);
             if (map.Id == "palace")
@@ -299,6 +303,23 @@ public sealed class PlacementPlanner
         public GarrisonMap Map { get; }
         public BoardCell[][] Routes { get; }
         public Dictionary<BoardCell, int>[] RouteIndex { get; }
+        private readonly Dictionary<BoardCell, (int Dist, int Index)[]> nearest = [];
+        public (int Dist, int Index)[] NearestRoutes(BoardCell cell)
+        {
+            if (nearest.TryGetValue(cell, out var result)) return result;
+            result = new (int Dist, int Index)[Routes.Length];
+            for (int k = 0; k < Routes.Length; k++)
+            {
+                result[k] = (int.MaxValue, 0);
+                for (int j = 0; j < Routes[k].Length; j++)
+                {
+                    var other = Routes[k][j];
+                    int distance = Math.Max(Math.Abs(cell.Col - other.Col), Math.Abs(cell.Row - other.Row));
+                    if (distance < result[k].Dist) result[k] = (distance, j);
+                }
+            }
+            return nearest[cell] = result;
+        }
         public BoardCell[][] Extra { get; } = [];
         public Dictionary<BoardCell, int>[] ExtraIndex { get; }
         public BoardCell[] Deployable { get; }
@@ -306,7 +327,8 @@ public sealed class PlacementPlanner
         public TileEffect? Tile { get; }
 
         public bool Legal(OpInfo op, BoardCell cell) => GarrisonMap.CanDeploy(Map.At(cell), op.Melee);
-        public bool OnMainRoute(BoardCell c) => RouteIndex.Any(d => d.ContainsKey(c));
+        private readonly HashSet<BoardCell> mainRoute;
+        public bool OnMainRoute(BoardCell c) => mainRoute.Contains(c);
     }
 
     // ── One planning job ───────────────────────────────────────────────────
@@ -316,6 +338,11 @@ public sealed class PlacementPlanner
         public required HashSet<string> Active;
         public required Dictionary<string, double> LayerValue;
         public required Dictionary<string, int> Counts;
+        public readonly Dictionary<string, string[]> ActiveByUnit = [];
+        public readonly Dictionary<string, double> ValueByUnit = [];
+        public readonly Dictionary<string, double> OwnStack = [];
+        public double Activation, MaxLayer;
+        public int BenchStackers;
         public double Lv(IEnumerable<string> covs) => covs.Sum(c => LayerValue.GetValueOrDefault(c));
     }
 
@@ -326,6 +353,29 @@ public sealed class PlacementPlanner
         private readonly List<string> _pool;
         private readonly List<string> _unplaceable;
         private readonly Dictionary<string, CovenantContext> _covCache = [];
+        private CovenantContext? _allOnField;
+        private readonly RouteField _routeField;
+        private readonly bool _poolHasHealer;
+        private readonly Dictionary<BoardCell, string> _occupied = [];
+        private readonly HashSet<string> _blockers = [];
+        private readonly Dictionary<string, int> _healed = [];
+        private readonly Dictionary<(OpInfo, BoardCell, Facing), int[]> _ranges = [];
+        private readonly Dictionary<(OpInfo, Facing), HashSet<(int, int)>> _offsetSets = [];
+
+        private int[] Range(OpInfo unit, BoardCell cell, Facing facing)
+        {
+            var key = (unit, cell, facing);
+            if (_ranges.TryGetValue(key, out var found)) return found;
+            return _ranges[key] = unit.Offsets[(int)facing]
+                .Select(o => _routeField.Index(new BoardCell(cell.Col + o.Col, cell.Row + o.Row))).ToArray();
+        }
+
+        private HashSet<(int, int)> OffsetSet(OpInfo unit, Facing facing)
+        {
+            var key = (unit, facing);
+            if (_offsetSets.TryGetValue(key, out var found)) return found;
+            return _offsetSets[key] = unit.Offsets[(int)facing].ToHashSet();
+        }
 
         public Job(PlacementPlanner owner, GarrisonMap map, IReadOnlyList<PlacementCandidate> pool, PlacementOptions options)
         {
@@ -341,6 +391,8 @@ public sealed class PlacementPlanner
                 else Info[c.Key] = info;
             }
             _pool = [.. Info.Keys];
+            _routeField = new RouteField(Board);
+            _poolHasHealer = Info.Values.Any(i => i.Healer);
         }
 
         public BoardInfo Board { get; }
@@ -377,6 +429,20 @@ public sealed class PlacementPlanner
                 lv[c] = 0.25 * v;
             }
             var ctx = new CovenantContext { Active = active, LayerValue = lv, Counts = counts };
+            foreach (var n in names)
+            {
+                var traits = Info[n].Covenants.Where(active.Contains).ToArray();
+                ctx.ActiveByUnit[n] = traits;
+                ctx.ValueByUnit[n] = ctx.Lv(traits);
+            }
+            foreach (var c in active)
+            {
+                bool core = _owner._covenants.TryGetValue(c, out var ci) && ci.BondType == "SEASON";
+                ctx.Activation += core ? 14 : 7;
+                if (core && counts.GetValueOrDefault(c) >= 6) ctx.Activation += 30;
+            }
+            ctx.MaxLayer = lv.Values.DefaultIfEmpty(0).Max();
+            ctx.BenchStackers = _pool.Count(n => !fieldSet.Contains(n) && Info[n].BenchOk);
             _covCache[key] = ctx;
             return ctx;
         }
@@ -405,72 +471,61 @@ public sealed class PlacementPlanner
         private Breakdown Evaluate(Dictionary<string, (BoardCell Cell, Facing Facing)> pl,
             Dictionary<string, List<string>>? notes)
         {
-            void Note(string n, string text) { if (notes is not null) notes[n].Add(text); }
-            var cov = Covenants(pl.Keys);
-            var at = new Dictionary<BoardCell, string>();
+            // Every field member comes from this job's pool. A full field always has the same covenants.
+            var cov = pl.Count == _pool.Count ? (_allOnField ??= Covenants(pl.Keys)) : Covenants(pl.Keys);
+            var at = _occupied;
+            at.Clear();
             foreach (var (n, v) in pl) at[v.Cell] = n;
+            var blockNames = _blockers;
+            blockNames.Clear();
             double comb = 0, stk = 0;
-            var dwell = new Dictionary<BoardCell, double>();
-            var kz = new Dictionary<BoardCell, double>();
-            var blockNames = new HashSet<string>();
             int routes = Board.Routes.Length;
             var blockIdx = new int?[routes];
             var bd = new Breakdown { Cov = cov, BlockTotal = new double[routes], BlockAt = blockIdx };
 
-            int? LayRoute(BoardCell[] rt, Dictionary<BoardCell, int> index, double rw, string label)
+            // Route order is static. The first occurrence of a route cell is its upstream index.
+            int? LayRoute(RouteLane lane, double rw, int routeNumber)
             {
-                var idx = pl.Where(kv => index.ContainsKey(kv.Value.Cell))
-                    .Select(kv => (J: index[kv.Value.Cell], N: kv.Key)).OrderBy(x => x.J).ThenBy(x => x.N, StringComparer.Ordinal).ToList();
-                if (idx.Count == 0)
+                int? firstIndex = null;
+                void CountBlocker(int j, string name)
                 {
-                    comb -= 40 * rw;
-                    foreach (var c in rt) dwell[c] = dwell.GetValueOrDefault(c) + 0.15 * rw;
-                    return null;
+                    var unit = Info[name];
+                    if (firstIndex.HasValue) { comb += 0.35 * unit.Block * rw; return; }
+                    firstIndex = j;
+                    blockNames.Add(name);
+                    var role = unit.Melee || unit.Role == PlacementRole.Support ? unit.Role : PlacementRole.Support;
+                    double bonus = role switch { PlacementRole.Tank => 25, PlacementRole.Damage => 6, PlacementRole.Stacker => 3, _ => -15 };
+                    comb += rw * (bonus + Math.Min(unit.Block, 3) * 1.5 + 1.2 * Math.Min(lane.Cells.Length - 1 - j, 5));
+                    notes?[name].Add($"{(routeNumber < 0 ? "D6 传送" : RouteLabel(routeNumber))}拦截点（离保护点 {lane.Cells.Length - 1 - j} 格）");
                 }
-                var (b, first) = idx[0];
-                blockNames.Add(first);
-                for (int j = 0; j < rt.Length; j++)
+                foreach (int j in lane.FirstVisits)
                 {
-                    var c = rt[j];
-                    double w = j <= b ? 0.15 + (b - j) switch { 0 => 1.9, 1 => 1.2, 2 => 0.6, _ => 0 } : 0.12;
-                    dwell[c] = dwell.GetValueOrDefault(c) + w * rw;
-                    if (j <= b && b - j <= 2) kz[c] = kz.GetValueOrDefault(c) + (b - j) switch { 0 => 2.0, 1 => 1.2, _ => 0.5 } * rw;
+                    if (!at.TryGetValue(lane.Cells[j], out var name)) continue;
+                    if (at.Count == pl.Count) CountBlocker(j, name);
+                    else // Imported pins can overlap. Desktop breaks ties by operator key.
+                        foreach (var other in pl.Where(p => p.Value.Cell == lane.Cells[j]).Select(p => p.Key).Order(StringComparer.Ordinal))
+                            CountBlocker(j, other);
                 }
-                var I = Info[first];
-                var t = I.Melee || I.Role == PlacementRole.Support ? I.Role : PlacementRole.Support;
-                double frontBonus = t switch { PlacementRole.Tank => 25, PlacementRole.Damage => 6, PlacementRole.Stacker => 3, _ => -15 };
-                comb += rw * (frontBonus + Math.Min(I.Block, 3) * 1.5 + 1.2 * Math.Min(rt.Length - 1 - b, 5));
-                foreach (var (_, m) in idx.Skip(1)) comb += 0.35 * Info[m].Block * rw;
-                Note(first, $"{label}拦截点（离保护点 {rt.Length - 1 - b} 格）");
-                return b;
+                if (!firstIndex.HasValue) comb -= 40 * rw;
+                return firstIndex;
             }
 
             for (int k = 0; k < routes; k++)
-                blockIdx[k] = LayRoute(Board.Routes[k], Board.RouteIndex[k], RW(k), RouteLabel(k));
+                blockIdx[k] = LayRoute(_routeField.Lanes[k], RW(k), k);
+            int? extraBlock = null;
             for (int e = 0; e < Board.Extra.Length; e++)
             {
-                LayRoute(Board.Extra[e], Board.ExtraIndex[e], 0.6, "D6 传送");
+                extraBlock = LayRoute(_routeField.Lanes[routes + e], 0.6, -1);
                 foreach (var (n, v) in pl)
                     if (Math.Max(Math.Abs(v.Cell.Col - 3), Math.Abs(v.Cell.Row - 3)) <= 1)
                     {
                         comb -= Info[n].Role == PlacementRole.Tank ? 2 : 4;
-                        Note(n, "在 D6 传送点周围，会周期性受伤");
+                        notes?[n].Add("在 D6 传送点周围，会周期性受伤");
                     }
             }
-
-            // Tiles that affect enemies: they are buffed whenever they walk over, so the line should be in front.
-            if (Board.Tile is { } tile)
-                for (int k = 0; k < routes; k++)
-                {
-                    var rt = Board.Routes[k];
-                    int? b = blockIdx[k];
-                    for (int j = 0; j < rt.Length; j++)
-                    {
-                        if (!Board.Special.Contains(rt[j]) || b is not null && j > b) continue;
-                        if (tile.Kind == TileKind.EnemyBuff) { comb -= tile.EnemyPenalty * RW(k); bd.TilePenalty = true; }
-                        if (tile.Kind == TileKind.Slow) dwell[rt[j]] = dwell.GetValueOrDefault(rt[j]) * 1.4;
-                    }
-                }
+            var terrain = _routeField.For(blockIdx, extraBlock);
+            foreach (double penalty in terrain.Penalties) comb -= penalty;
+            bd.TilePenalty = terrain.Penalties.Length > 0;
 
             foreach (var (n, v) in pl)
             {
@@ -479,16 +534,11 @@ public sealed class PlacementPlanner
                     comb -= 12;
                 // Depth: tanks in front, melee next, ranged at the back.
                 (int Dist, int Route, int J)? best = null;
+                var nearest = Board.NearestRoutes(v.Cell);
                 for (int k = 0; k < routes; k++)
                 {
                     if (blockIdx[k] is null) continue;
-                    var rt = Board.Routes[k];
-                    int dist = int.MaxValue, jj = 0;
-                    for (int j = 0; j < rt.Length; j++)
-                    {
-                        int d = Math.Max(Math.Abs(v.Cell.Col - rt[j].Col), Math.Abs(v.Cell.Row - rt[j].Row));
-                        if (d < dist) { dist = d; jj = j; }
-                    }
+                    var (dist, jj) = nearest[k];
                     if (dist <= 2 && (best is null || dist < best.Value.Dist)) best = (dist, k, jj);
                 }
                 if (best is { } bb)
@@ -507,36 +557,39 @@ public sealed class PlacementPlanner
             {
                 var I = Info[n];
                 double c = 0;
-                foreach (var (dx, dy) in I.Offsets[(int)v.Facing]) c += dwell.GetValueOrDefault(new BoardCell(v.Cell.Col + dx, v.Cell.Row + dy));
+                foreach (int index in Range(I, v.Cell, v.Facing)) c += terrain.Dwell[index];
                 var (mult, txt) = TileMultiplier(I, v.Cell, v.Facing);
-                if (txt is not null) Note(n, txt);
+                if (txt is not null) notes?[n].Add(txt);
                 if (txt is not null && Board.Tile is { Drain: true } && blockNames.Contains(n)) comb -= 4;
                 comb += 2.2 * I.Power * c * mult;
-                if (c > 0 && I.Role == PlacementRole.Damage) Note(n, $"输出区覆盖 {c * mult:0.0}");
+                if (c > 0 && I.Role == PlacementRole.Damage) notes?[n].Add($"输出区覆盖 {c * mult:0.0}");
             }
 
             // Healers: cover whoever holds the line; a second healer on the same person adds less.
-            var healed = new Dictionary<string, List<string>>();
+            var healed = _healed;
+            healed.Clear();
             foreach (var (n, v) in pl)
             {
-                var I = Info[n];
-                if (!I.Healer) continue;
-                var cells = I.Offsets[(int)v.Facing].Select(o => new BoardCell(v.Cell.Col + o.Col, v.Cell.Row + o.Row)).ToHashSet();
-                var hit = pl.Where(kv => cells.Contains(kv.Value.Cell) && Board.OnMainRoute(kv.Value.Cell)).Select(kv => kv.Key).ToList();
-                foreach (var m in hit)
+                var unit = Info[n];
+                if (!unit.Healer) continue;
+                bd.Healers.Add(n);
+                var offsets = OffsetSet(unit, v.Facing);
+                var hit = notes is null ? null : new List<string>();
+                foreach (var (target, pos) in pl)
                 {
-                    if (!healed.TryGetValue(m, out var list)) healed[m] = list = [];
-                    list.Add(n);
+                    if (!Board.OnMainRoute(pos.Cell) || !offsets.Contains((pos.Cell.Col - v.Cell.Col, pos.Cell.Row - v.Cell.Row))) continue;
+                    healed[target] = healed.GetValueOrDefault(target) + 1;
+                    hit?.Add(target);
                 }
-                if (hit.Count > 0) Note(n, "奶到 " + string.Join("、", hit));
+                if (hit is { Count: > 0 }) notes?[n].Add("奶到 " + string.Join("、", hit));
             }
-            foreach (var (m, hs) in healed)
-                comb += (blockNames.Contains(m) ? 9 : 3) * (1 + 0.25 * (hs.Count - 1));
-            // Composition: keep at least one healer on the field when the pool has one, and make it reach
-            // whoever holds a line (a healer that heals nobody blocking is close to no healer).
-            bd.Healers = pl.Keys.Where(n => Info[n].Healer).ToList();
-            bd.HealerCoversLine = healed.Keys.Any(blockNames.Contains);
-            if (bd.Healers.Count == 0 && _pool.Any(n => Info[n].Healer)) comb -= 45;
+            foreach (var (m, count) in healed)
+            {
+                bool front = blockNames.Contains(m);
+                bd.HealerCoversLine |= front;
+                comb += (front ? 9 : 3) * (1 + 0.25 * (count - 1));
+            }
+            if (bd.Healers.Count == 0 && _poolHasHealer) comb -= 45;
             else if (bd.Healers.Count > 0 && !bd.HealerCoversLine) comb -= 12;
 
             // Block count at each block point and the two cells behind it.
@@ -545,18 +598,18 @@ public sealed class PlacementPlanner
                 if (blockIdx[k] is not int b) continue;
                 var rt = Board.Routes[k];
                 double total = 0;
-                var who = new List<string>();
+                var who = notes is null ? null : new List<string>();
                 for (int j = b; j < Math.Min(b + 3, rt.Length); j++)
                 {
                     if (!at.TryGetValue(rt[j], out var m)) continue;
                     double bl = Info[m].Block * (Info[m].Melee ? 1 : 0.5);
                     total += bl;
-                    who.Add($"{m}{bl:0.#}");
+                    who?.Add($"{m}{bl:0.#}");
                 }
                 bd.BlockTotal[k] = total;
                 if (total < BlockNeed) comb -= 10 * (BlockNeed - total) * RW(k);
                 if (at.TryGetValue(rt[b], out var firstName))
-                    Note(firstName, $"{RouteLabel(k)}阻挡 {total:0.#}/{BlockNeed:0}（{string.Join("、", who)}）");
+                    notes?[firstName].Add($"{RouteLabel(k)}阻挡 {total:0.#}/{BlockNeed:0}（{string.Join("、", who!)}）");
             }
 
             // Second contact: 1–2 cells behind a block point is where enemies go next when it breaks.
@@ -564,16 +617,16 @@ public sealed class PlacementPlanner
             {
                 if (blockIdx[k] is not int b) continue;
                 var rt = Board.Routes[k];
-                foreach (int j in new[] { b + 1, b + 2 })
+                for (int j = b + 1; j <= b + 2; j++)
                 {
                     if (j >= rt.Length || !at.TryGetValue(rt[j], out var m)) continue;
                     var I = Info[m];
                     double w = RW(k) * (j == b + 1 ? 1.0 : 0.6);
-                    if (I.SkillBlock) { comb += 3 * w; Note(m, "第二接敌位（技能可阻挡，能顶前排）"); }
+                    if (I.SkillBlock) { comb += 3 * w; notes?[m].Add("第二接敌位（技能可阻挡，能顶前排）"); }
                     else if (I.Role == PlacementRole.Support || !I.Melee && I.Role != PlacementRole.Tank)
-                    { comb -= 8 * w; Note(m, "站在第二接敌位，前排被突破就会先挨打"); }
+                    { comb -= 8 * w; notes?[m].Add("站在第二接敌位，前排被突破就会先挨打"); }
                     else if (I.Melee && I.Role is PlacementRole.Damage or PlacementRole.Tank)
-                    { comb += 5 * w * (I.Role == PlacementRole.Damage ? I.Power : 0.6); Note(m, "第二接敌位（补位 + 输出）"); }
+                    { comb += 5 * w * (I.Role == PlacementRole.Damage ? I.Power : 0.6); notes?[m].Add("第二接敌位（补位 + 输出）"); }
                 }
             }
 
@@ -584,11 +637,11 @@ public sealed class PlacementPlanner
                     if (!Info[n].Covenants.Contains("灵巧")) continue;
                     var nb = pl.Where(kv => kv.Key != n && Manhattan(kv.Value.Cell, v.Cell) == 1).Select(kv => kv.Key).ToList();
                     comb += nb.Sum(m => 3 * Affinity(Stat.Aspd, Info[m].Role) * Info[m].Power);
-                    if (nb.Count > 0) Note(n, "灵巧光环（周围四格攻速）：" + string.Join("、", nb));
+                    if (nb.Count > 0) notes?[n].Add("灵巧光环（周围四格攻速）：" + string.Join("、", nb));
                 }
 
             // Positional traits.
-            IEnumerable<string> Act(string n) => Info[n].Covenants.Where(cov.Active.Contains);
+            string[] Act(string n) => cov.ActiveByUnit[n];
             foreach (var (n, v) in pl)
             {
                 var I = Info[n];
@@ -598,72 +651,72 @@ public sealed class PlacementPlanner
                 at.TryGetValue(new BoardCell(v.Cell.Col - fx, v.Cell.Row - fy), out var back);
                 if (I.SelfFront > 0 && front is not null)
                 {
-                    var tg = Act(front).ToList();
-                    stk += I.SelfFront * cov.Lv(tg);
-                    Note(n, $"身前 {front}：{(tg.Count > 0 ? string.Join("、", tg) : "无已激活盟约")} 各 +{I.SelfFront:0.#} 层/回合");
+                    var tg = Act(front);
+                    stk += I.SelfFront * cov.ValueByUnit[front];
+                    notes?[n].Add($"身前 {front}：{(tg.Length > 0 ? string.Join("、", tg) : "无已激活盟约")} 各 +{I.SelfFront:0.#} 层/回合");
                 }
                 if (I.SelfBack > 0 && back is not null)
                 {
-                    var tg = Act(back).ToList();
-                    stk += I.SelfBack * cov.Lv(tg);
-                    Note(n, $"身后 {back}：{(tg.Count > 0 ? string.Join("、", tg) : "无已激活盟约")} 各 +{I.SelfBack:0.#} 层");
+                    var tg = Act(back);
+                    stk += I.SelfBack * cov.ValueByUnit[back];
+                    notes?[n].Add($"身后 {back}：{(tg.Length > 0 ? string.Join("、", tg) : "无已激活盟约")} 各 +{I.SelfBack:0.#} 层");
                 }
                 if (nm == "帕拉斯" && front is not null && Info[front].Melee)
                 {
                     comb += 6 + (blockNames.Contains(front) ? 4 : 0);
-                    Note(n, $"技能：身前 {front} 阻挡 +1、攻击 / 防御提升");
+                    notes?[n].Add($"技能：身前 {front} 阻挡 +1、攻击 / 防御提升");
                 }
                 if (nm == "凛御银灰")
                 {
                     if (front is not null && Info[front].Covenants.Any(c => c is "谢拉格" or "灵巧") && Info[front].Cap > 0)
                     {
-                        stk += Info[front].Cap * 0.75 * 0.8 * cov.Lv(Act(front));
-                        Note(n, $"身前 {front} 叠层上限 {Info[front].Cap:0.#}→{Info[front].Cap * 1.75:0.#}");
+                        stk += Info[front].Cap * 0.75 * 0.8 * cov.ValueByUnit[front];
+                        notes?[n].Add($"身前 {front} 叠层上限 {Info[front].Cap:0.#}→{Info[front].Cap * 1.75:0.#}");
                     }
-                    else Note(n, "身前没有带上限的谢拉格 / 灵巧叠层干员，特质没用上");
+                    else notes?[n].Add("身前没有带上限的谢拉格 / 灵巧叠层干员，特质没用上");
                 }
                 if (nm == "Mon3tr")
                 {
                     var tg = pl.Where(kv => kv.Key != n && Chebyshev(kv.Value.Cell, v.Cell) == 1 && Info[kv.Key].Cap > 0).Select(kv => kv.Key).ToList();
-                    stk += tg.Sum(m => Info[m].Cap * 0.3 * 0.8 * cov.Lv(Act(m)));
-                    if (tg.Count > 0) Note(n, "周围八格 " + string.Join("、", tg) + " 叠层上限 +30%");
+                    stk += tg.Sum(m => Info[m].Cap * 0.3 * 0.8 * cov.ValueByUnit[m]);
+                    if (tg.Count > 0) notes?[n].Add("周围八格 " + string.Join("、", tg) + " 叠层上限 +30%");
                 }
                 if (nm == "阿米娅" && front is not null && Info[front].StacksLayers)
                 {
-                    stk += Info[front].TriggersPerRound * cov.Lv(Act(front)) * 0.8;
-                    Note(n, $"身前 {front} 每次叠层额外 +1");
+                    stk += Info[front].TriggersPerRound * cov.ValueByUnit[front] * 0.8;
+                    notes?[n].Add($"身前 {front} 每次叠层额外 +1");
                 }
                 if (nm == "华法琳" && front is not null)
                 {
                     int k = Math.Min(7, Info[front].SkillCasts);
-                    stk += k * cov.Lv(Act(front));
-                    Note(n, $"身前 {front} 开技能叠层（约 {k} 次/回合）");
+                    stk += k * cov.ValueByUnit[front];
+                    notes?[n].Add($"身前 {front} 开技能叠层（约 {k} 次/回合）");
                 }
                 if (nm == "铃兰" && front is not null && Info[front].OnceAmount > 0)
                 {
-                    stk += Info[front].OnceAmount * cov.Lv(Act(front));
-                    Note(n, $"身前 {front} 每回合重复触发“获得时”");
+                    stk += Info[front].OnceAmount * cov.ValueByUnit[front];
+                    notes?[n].Add($"身前 {front} 每回合重复触发“获得时”");
                 }
                 if (nm == "塞雷娅" && front is not null && Info[front].Trait.Contains("休整期结束时"))
                 {
                     // The copy behaves as if 塞雷娅 had the trait: "自身" / "身前一格" / "同一行" are hers.
                     double copied = RoundEndValue(Info[front], n, v.Cell, v.Facing, pl, at, cov);
                     stk += copied;
-                    Note(n, $"复制身前 {front} 的休整期结束时特质（叠层价值约 {copied:0.#}）");
+                    notes?[n].Add($"复制身前 {front} 的休整期结束时特质（叠层价值约 {copied:0.#}）");
                 }
                 if (nm == "浊心斯卡蒂")
                 {
                     var cells = I.Offsets[(int)v.Facing].Select(o => new BoardCell(v.Cell.Col + o.Col, v.Cell.Row + o.Row)).ToHashSet();
                     int k = pl.Count(kv => kv.Key != n && cells.Contains(kv.Value.Cell));
                     stk += 2 * Math.Min(k, 10) * cov.Lv(["阿戈尔"]);
-                    Note(n, $"范围内 {k} 名友方（每人 +2 阿戈尔）");
+                    notes?[n].Add($"范围内 {k} 名友方（每人 +2 阿戈尔）");
                 }
                 if (I.Around4)
                 {
                     var nb = pl.Where(kv => kv.Key != n && Manhattan(kv.Value.Cell, v.Cell) == 1 && Info[kv.Key].Role == PlacementRole.Damage)
                         .Select(kv => kv.Key).ToList();
                     comb += nb.Sum(m => 3 * Info[m].Power);
-                    if (nb.Count > 0) Note(n, "周围四格增益 " + string.Join("、", nb));
+                    if (nb.Count > 0) notes?[n].Add("周围四格增益 " + string.Join("、", nb));
                 }
                 if (RowOfThree.Contains(nm) || nm == "罗比菈塔")
                 {
@@ -671,17 +724,17 @@ public sealed class PlacementPlanner
                     if (nm == "罗比菈塔")
                     {
                         stk += 2 * rowCount * cov.Lv(new[] { "坚守", "助力" }.Where(cov.Active.Contains));
-                        Note(n, $"同一行 {rowCount} 人");
+                        notes?[n].Add($"同一行 {rowCount} 人");
                     }
-                    else if (rowCount >= 3) { stk += 12; Note(n, $"同一行 {rowCount} 人，触发"); }
-                    else Note(n, $"同一行只有 {rowCount} 人，未触发");
+                    else if (rowCount >= 3) { stk += 12; notes?[n].Add($"同一行 {rowCount} 人，触发"); }
+                    else notes?[n].Add($"同一行只有 {rowCount} 人，未触发");
                 }
                 if (I.KillRange)
                 {
                     double c = 0;
-                    foreach (var (dx, dy) in I.Offsets[(int)v.Facing]) c += kz.GetValueOrDefault(new BoardCell(v.Cell.Col + dx, v.Cell.Row + dy));
+                    foreach (int index in Range(I, v.Cell, v.Facing)) c += terrain.KillZone[index];
                     stk += 1.8 * c;
-                    Note(n, $"范围内击倒 / 控制叠层：罩住拦截点及前方 1~2 格（{c:0.0}）");
+                    notes?[n].Add($"范围内击倒 / 控制叠层：罩住拦截点及前方 1~2 格（{c:0.0}）");
                 }
             }
 
@@ -690,23 +743,19 @@ public sealed class PlacementPlanner
             {
                 var I = Info[n];
                 if (I.KillRange || I.SelfFront > 0 || I.SelfBack > 0 || I.Name == "罗比菈塔" || I.StackKind is not ("covenant" or "self")) continue;
-                double own = I.Trait.Contains("休整期结束时") ? RoundEndValue(I, n, v.Cell, v.Facing, pl, at, cov)
-                    : I.StackPerRound * cov.Lv(I.StackKind == "self" ? Act(n) : I.StackCovenants.Where(cov.Active.Contains));
+                if (!cov.OwnStack.TryGetValue(n, out var own))
+                {
+                    own = I.RoundEnd ? RoundEndValue(I, n, v.Cell, v.Facing, pl, at, cov)
+                        : I.StackPerRound * (I.StackKind == "self" ? cov.ValueByUnit[n] : cov.Lv(I.StackCovenants.Where(cov.Active.Contains)));
+                    if (!I.RoundEnd || !I.DependsOnPosition) cov.OwnStack[n] = own;
+                }
                 stk += own;
-                if (own > 0 && I.Name == "涤火杰西卡") Note(n, $"按满层估算：场上 {pl.Count} 人都带装备，维多利亚 / 坚守各 +{2 * pl.Count} 层");
+                if (own > 0 && I.Name == "涤火杰西卡") notes?[n].Add($"按满层估算：场上 {pl.Count} 人都带装备，维多利亚 / 坚守各 +{2 * pl.Count} 层");
             }
 
             // Activating covenants is worth something in itself; bench-effective operators still stack.
-            double activation = 0;
-            foreach (var c in cov.Active)
-            {
-                bool core = _owner._covenants.TryGetValue(c, out var ci) && ci.BondType == "SEASON";
-                activation += core ? 14 : 7;
-                if (core && cov.Counts.GetValueOrDefault(c) >= 6) activation += 30;
-            }
-            double maxLv = cov.LayerValue.Values.DefaultIfEmpty(0).Max();
-            foreach (var n in _pool.Where(n => !pl.ContainsKey(n)))
-                if (Info[n].BenchOk) stk += 6 * maxLv;
+            double activation = cov.Activation;
+            for (int i = 0; i < cov.BenchStackers; i++) stk += 6 * cov.MaxLayer;
 
             bd.Combat = comb;
             bd.Stack = stk;
@@ -775,7 +824,7 @@ public sealed class PlacementPlanner
 
         // ── Search ─────────────────────────────────────────────────────────
 
-        public Dictionary<string, (BoardCell Cell, Facing Facing)> Solve(CancellationToken cancel)
+        public Dictionary<string, (BoardCell Cell, Facing Facing)> Solve(CancellationToken cancel, Action<int, int>? progress)
         {
             var rnd = new Random(_options.Seed);
             var pins = _options.Pins.Where(kv => Info.ContainsKey(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -785,8 +834,24 @@ public sealed class PlacementPlanner
             double bestScore = double.MinValue;
             if (_pool.Count == 0) return [];
 
+            var movable = new List<string>(field);
+            var bench = new List<string>(free.Count);
+            var options = new List<BoardCell>(Board.Deployable.Length);
+            var occupied = new HashSet<BoardCell>();
+            var meleeCells = Board.Deployable.Where(c => GarrisonMap.CanDeploy(Board.Map.At(c), true)).ToArray();
+            void FindOpen(Dictionary<string, (BoardCell Cell, Facing Facing)> layout, string name)
+            {
+                occupied.Clear();
+                options.Clear();
+                foreach (var (other, pos) in layout)
+                    if (other != name) occupied.Add(pos.Cell);
+                foreach (var c in Info[name].Melee ? meleeCells : Board.Deployable)
+                    if (!occupied.Contains(c)) options.Add(c);
+            }
+
             for (int restart = 0; restart < Math.Max(1, _options.Restarts); restart++)
             {
+                progress?.Invoke(restart + 1, Math.Max(1, _options.Restarts));
                 var pl = new Dictionary<string, (BoardCell Cell, Facing Facing)>();
                 foreach (var (n, p) in pins) pl[n] = (p.Cell, p.Facing);
                 var used = pl.Values.Select(v => v.Cell).ToHashSet();
@@ -804,16 +869,21 @@ public sealed class PlacementPlanner
                 double cur = Score(pl);
                 if (cur > bestScore) { bestScore = cur; best = new(pl); }
                 int iters = Math.Max(100, _options.Iterations);
+                var cand = new Dictionary<string, (BoardCell Cell, Facing Facing)>(field);
                 for (int it = 0; it < iters; it++)
                 {
                     if ((it & 255) == 0 && cancel.IsCancellationRequested) break;
                     double T = Math.Max(0.05, 8.0 * (1 - (double)it / iters));
-                    var movable = pl.Keys.Where(k => !pins.ContainsKey(k)).ToList();
+                    movable.Clear();
+                    foreach (var k in pl.Keys) if (!pins.ContainsKey(k)) movable.Add(k);
                     if (movable.Count == 0) break;
-                    var cand = new Dictionary<string, (BoardCell Cell, Facing Facing)>(pl);
+                    cand.Clear();
+                    foreach (var entry in pl) cand.Add(entry.Key, entry.Value);
                     string n = movable[rnd.Next(movable.Count)];
                     double mv = rnd.NextDouble();
-                    var bench = free.Where(m => !cand.ContainsKey(m)).ToList();
+                    bench.Clear();
+                    if (mv < 0.2 && pl.Count < _pool.Count)
+                        foreach (var m in free) if (!cand.ContainsKey(m)) bench.Add(m);
                     if (mv < 0.2 && bench.Count > 0)
                     {
                         string m = bench[rnd.Next(bench.Count)];
@@ -821,21 +891,26 @@ public sealed class PlacementPlanner
                         cand.Remove(n);
                         if (!Board.Legal(Info[m], cell))
                         {
-                            var occ = cand.Values.Select(v => v.Cell).ToHashSet();
-                            var opts = Board.Deployable.Where(c => !occ.Contains(c) && Board.Legal(Info[m], c)).ToList();
-                            if (opts.Count == 0) continue;
-                            cell = opts[rnd.Next(opts.Count)];
+                            FindOpen(cand, m);
+                            if (options.Count == 0) continue;
+                            cell = options[rnd.Next(options.Count)];
                         }
                         cand[m] = (cell, f);
                     }
                     else if (mv < 0.5)
                     {
-                        var occ = cand.Where(kv => kv.Key != n).Select(kv => kv.Value.Cell).ToHashSet();
-                        var opts = Board.Deployable.Where(c => !occ.Contains(c) && Board.Legal(Info[n], c)).ToList();
-                        if (opts.Count == 0) continue;
-                        cand[n] = (opts[rnd.Next(opts.Count)], cand[n].Facing);
+                        FindOpen(cand, n);
+                        if (options.Count == 0) continue;
+                        var next = options[rnd.Next(options.Count)];
+                        if (next == cand[n].Cell) continue;
+                        cand[n] = (next, cand[n].Facing);
                     }
-                    else if (mv < 0.75) cand[n] = (cand[n].Cell, Faces[rnd.Next(4)]);
+                    else if (mv < 0.75)
+                    {
+                        var next = Faces[rnd.Next(4)];
+                        if (next == cand[n].Facing) continue;
+                        cand[n] = (cand[n].Cell, next);
+                    }
                     else
                     {
                         string m = movable[rnd.Next(movable.Count)];
@@ -843,7 +918,7 @@ public sealed class PlacementPlanner
                         (cand[n], cand[m]) = ((cand[m].Cell, cand[n].Facing), (cand[n].Cell, cand[m].Facing));
                     }
                     double sc = Score(cand);
-                    if (sc >= cur || rnd.NextDouble() < Math.Exp((sc - cur) / T)) { pl = cand; cur = sc; }
+                    if (sc >= cur || rnd.NextDouble() < Math.Exp((sc - cur) / T)) { (pl, cand) = (cand, pl); cur = sc; }
                     if (cur > bestScore) { bestScore = cur; best = new(pl); }
                 }
             }
