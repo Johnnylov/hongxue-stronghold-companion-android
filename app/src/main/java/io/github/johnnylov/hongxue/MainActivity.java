@@ -100,7 +100,7 @@ public final class MainActivity extends Activity {
         }
         @JavascriptInterface public void copy(String text) {
             runOnUiThread(() -> ((ClipboardManager)getSystemService(CLIPBOARD_SERVICE))
-                .setPrimaryClip(ClipData.newPlainText("鸿雪手册", text)));
+                .setPrimaryClip(ClipData.newPlainText("马头·卫戍手册", text)));
         }
         @JavascriptInterface public void share(String text) {
             runOnUiThread(() -> startActivity(Intent.createChooser(new Intent(Intent.ACTION_SEND)

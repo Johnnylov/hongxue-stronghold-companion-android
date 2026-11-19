@@ -85,18 +85,19 @@ const Teams = (() => {
     }
     if (k.startsWith("op:")) {
       const name = k.slice(3);
-      if (on) db.run.counts[name] = Math.max(n, db.run.counts[name] || 0);
-      else {
+      const unit = {name,count:db.run.counts[name] || 0,elite:db.run.elite[name] || 0};
+      if (on) QuickRoster.purchaseFloor(unit, n);
+      else if (QuickRoster.rawCopies(unit) <= n) {
         const remaining = [...new Set(db.teams.flatMap((t) => t.owned))]
           .map((x) => JSON.parse(x))
           .filter(([key]) => key === k)
           .map((x) => x[1]);
-        db.run.counts[name] = Math.max(0, ...remaining);
-        db.run.elite[name] = Math.min(
-          db.run.elite[name] || 0,
-          db.run.counts[name],
-        );
+        unit.count = Math.max(0, ...remaining);
+        unit.elite = 0;
+        QuickRoster.normalize(unit);
       }
+      db.run.counts[name] = unit.count;
+      db.run.elite[name] = unit.elite;
     }
   }
   function roundChanged() {
@@ -834,6 +835,7 @@ const Teams = (() => {
     $("team-error").textContent = "链接已生成，可复制或系统分享。";
   };
   return {
+    finalIndex,
     toPC,
     fromPC,
     pane,

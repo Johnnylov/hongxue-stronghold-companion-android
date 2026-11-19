@@ -1,5 +1,11 @@
 "use strict";
 const Economy = (() => {
+  const maxMoney = 20;
+  function balance(value) {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.min(maxMoney, Math.max(0, Math.trunc(n))) : null;
+  }
   function price(run, table) {
     if (run.terminal >= 6) return null;
     if (Number.isInteger(run.upgrade)) return run.upgrade;
@@ -31,9 +37,11 @@ const Economy = (() => {
       : Number.isInteger(initial)
         ? `升至 ${r.terminal + 1} 级基础价 ${initial} · 每过一回合减 1，最低 0`
         : "此模式缺少基础价资料";
+    const amounts = Array.from({length:maxMoney + 1}, (_, n) =>
+      `<button type="button" class="chip" data-w="money-use" data-v="${n}" aria-pressed="${r.money === n}">${n}</button>`).join("");
     return `<div class="eco-grid"><div class="eco-card"><b>资金</b><strong>${Number.isInteger(r.money) ? r.money + " · 当前余额" : "按手机余额选择"}</strong><small>${esc(example)}</small>
-      <input id="run-money" aria-label="实际余额" type="number" min="0" max="9999" value="${r.money ?? ""}">
-      <div class="actions">${Number.isInteger(r.money) ? W.act("money-1", "−1", "chip") + W.act("money+1", "＋1", "chip") : ""}${Number.isInteger(tutorial) || Number.isInteger(seen) ? W.act("money-use", "采用 " + (tutorial ?? seen), "linkbtn", String(tutorial ?? seen)) : ""}</div></div>
+      <div class="balance-choices" role="group" aria-label="本局资金">${amounts}</div>
+      <div class="actions">${r.money != null ? W.act("money-use", "清除余额", "linkbtn") : ""}${Number.isInteger(tutorial) || Number.isInteger(seen) ? W.act("money-use", "采用 " + (tutorial ?? seen), "linkbtn", String(tutorial ?? seen)) : ""}</div></div>
       <div class="eco-card"><b>升级价</b><strong>${full ? "已满级" : computed === null ? "选择升到本级的回合" : computed + " 资金"}</strong><small>${esc(costNote)}</small>
       ${!full && r.terminal > 1 ? W.control("升至当前等级的回合", W.select("run-levelSince", [["", "请选择"], ...Array.from({ length: r.round }, (_, i) => i + 1)], since || "")) : ""}
       ${full ? "" : `<details><summary>按游戏画面修正价格</summary><input id="run-upgrade" aria-label="本次实际升级价" type="number" min="0" max="${Math.max(20, initial || 0, r.upgrade || 0)}" value="${r.upgrade ?? ""}">${W.act("price-auto", "恢复规则计算", "linkbtn")}</details>`}</div></div>`;
@@ -57,5 +65,5 @@ const Economy = (() => {
       if (r.levelSince > r.round) r.levelSince = null;
     }
   }
-  return { price, view, changed };
+  return { price, view, changed, balance };
 })();

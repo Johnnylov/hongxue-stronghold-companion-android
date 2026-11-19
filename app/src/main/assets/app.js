@@ -271,13 +271,20 @@ function renderDetail(g) {
     ${editing ? Teams.pane(g) : ""}${stageTabs(g.stages, i, "detail-stage")}
     ${s.note || editing ? `<div class="note">${esc(s.note || "可在「编辑阶段」里写下运营思路。")}</div>` : ""}
     ${s.bonds?.length ? `<div class="tags controls">${s.bonds.map(tag).join("")}</div>` : ""}
-    ${editing ? `<div class="actions">${button("pick", "＋ 配干员 / 装备", "btn")}${button("stage-edit", "编辑阶段", "btn light")}${button("jump", "查看购买清单", "btn light narrow-only")}</div>` : ""}
+    ${editing ? `<div class="actions">${button("stage-quick", "快调干员", "btn")}${button("pick", "配干员 / 装备", "btn light")}${button("stage-edit", "编辑阶段", "btn light")}${button("jump", "查看购买清单", "btn light narrow-only")}</div>` : ""}
     ${group("op", "干员")}${group("eq", "装备")}`;
 }
 function renderBasket() {
+  const recommending = db.prefs.basketTab === "recommend";
+  const tabs = `<div class="tracking-tabs basket-tabs" role="group" aria-label="购买清单与推荐阵容">${[["shop","购买清单"],["recommend","推荐阵容"]].map(([tab,title]) =>
+    `<button data-act="basket-tab" data-tab="${tab}" class="${(tab === "recommend") === recommending ? "chosen" : ""}" aria-pressed="${(tab === "recommend") === recommending}">${title}</button>`).join("")}</div>`;
+  if (recommending) {
+    basket.innerHTML = tabs + RunLineups.view();
+    return;
+  }
   const t = active();
   if (!t) {
-    basket.innerHTML = `<h2>购买清单</h2>${empty("还没有跟踪的阵容", "从攻略复制一份阵容，或自己挑选干员和装备，购买目标就会出现在这里。")}
+    basket.innerHTML = tabs + RunLineups.preview() + `${empty("还没有跟踪的阵容", "从攻略复制一份阵容，或自己挑选干员和装备，购买目标就会出现在这里。")}
     <div class="actions controls">${button("new", "新建阵容", "btn light")}</div>`;
     return;
   }
@@ -295,8 +302,7 @@ function renderBasket() {
       })
       .join("")}</div>`;
   };
-  basket.innerHTML = `<div class="basket-head"><h2>购买清单</h2><span class="count">${done} / ${rows.length}</span></div>
-    <div class="buytitle">${idButton("open-team", t.title, t.id, "linkbtn")}</div>
+  basket.innerHTML = tabs + RunLineups.preview() + `<div class="basket-head"><div class="buytitle">${idButton("open-team", t.title, t.id, "linkbtn")}</div><span class="count">${done} / ${rows.length}</span></div>
     <label><span class="hint">当前阶段</span><select class="compact-select" id="basketStage" aria-label="购买清单阶段">${t.stages.map((st, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${esc(GuideModel.stageText(st))}</option>`).join("")}</select></label>
     <p class="hint">${s.rangeSource === "默认参考" ? "默认按 16 回合划分，可在「阶段与回合」调整。" : s.start ? "本阶段按指定回合范围执行。" : s.isFinal ? "成型目标按实际进度切换。" : "此阶段可手动切换。"}</p>
     <progress class="progress" value="${done}" max="${rows.length || 1}" aria-label="购买进度"></progress>
@@ -310,20 +316,20 @@ function editStage(i) {
   persist();
   render();
 }
-function incorporate(g) {
+function incorporate(g, stage = previewStage, owned = [], destination = "teams") {
   const id =
     globalThis.crypto?.randomUUID?.() ||
     String(Date.now()) + "-" + Math.random().toString(36).slice(2);
   const t = {
     ...clone(g),
     id,
-    stage: Math.min(previewStage, g.stages.length - 1),
-    owned: [],
+    stage: Math.min(stage, g.stages.length - 1),
+    owned,
   };
   db.teams.unshift(t);
   db.active = t.id;
   close();
-  move("teams", t.id);
+  move(destination, destination === "teams" ? t.id : null);
   return t;
 }
 function formField(label, id, value, multi = false) {
@@ -448,7 +454,7 @@ function confirmDialog(title, message, action, label) {
   );
 }
 function about() {
-  popup(`<h2>鸿雪 · 卫戍手册</h2><p>Android 平板移植版 1.0.2 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
+  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.0.3 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
     ${section("本地保存")}<p>阵容与购买进度保存在这台设备。卸载应用或清除应用数据会移除记录。</p>
     <div class="actions">${button("legal", "许可与归属", "btn light")}</div>`);
 }
@@ -460,6 +466,25 @@ document.addEventListener("click", async (ev) => {
     k = b.dataset.key,
     i = Number(b.dataset.index),
     t = viewing();
+  if (a === "basket-tab") {
+    db.prefs.basketTab = b.dataset.tab;
+    persist();
+    renderBasket();
+    return;
+  }
+  if (a === "follow-run-lineup") {
+    RunLineups.follow(b.dataset.origin, id, i);
+    return;
+  }
+  if (a === "retry-run-field") {
+    RunLineups.retryField();
+    render();
+    return;
+  }
+  if (a === "compute-run-target") {
+    RunLineups.computeTarget();
+    return;
+  }
   if (a === "library" || a === "teams") {
     move(a);
     return;
@@ -519,6 +544,13 @@ document.addEventListener("click", async (ev) => {
       close();
       render();
     }
+    return;
+  }
+  if (a === "stage-quick" && t) {
+    const stage = t.stages[stageNum(t)];
+    QuickRoster.open({title:"快调阶段干员", pool:QuickRoster.fromStage(stage), names:Object.keys(Workbench.rawOps),
+      apply(pool) { QuickRoster.applyStage(stage, pool); persist(); render(); }
+    });
     return;
   }
   if (a === "pick") {
@@ -611,10 +643,13 @@ document.addEventListener("click", async (ev) => {
     db.run.elite = {};
     persist();
     close();
-    renderBasket();
+      render();
     return;
   }
   if (a === "jump") {
+    db.prefs.basketTab = "shop";
+    persist();
+    renderBasket();
     basket.scrollIntoView({ behavior: "smooth" });
     return;
   }
@@ -669,9 +704,10 @@ document.addEventListener("change", (ev) => {
   if (el.dataset.buy) {
     const t = active();
     Teams.mark(el.dataset.buy, el.checked);
+    Maps.ownedChanged();
     persist();
     renderBasket();
-    if (db.page === "map" && db.board?.tab === "shop") Maps.render();
+    if (db.page === "map") Maps.render();
   }
 });
 dialog.addEventListener("close", () => {
@@ -740,6 +776,13 @@ async function start() {
       persist();
     }
     await Workbench.initialize();
+    if (db.page === "run") {
+      db.page = "map";
+      db.prefs.mapRunOpen = true;
+      if (db.board) db.board.tab = "board";
+      persist();
+    }
+    Maps.restoreRosterSource();
     render();
   } catch (e) {
     desk.innerHTML = `<h2>手册暂时无法打开</h2><p>${esc(e.message)}</p>`;

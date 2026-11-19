@@ -1,18 +1,8 @@
 "use strict";
 const Maps = (() => {
   const W = Workbench;
-  let countDraft = [];
-  function countRow(p, i) {
-    function choices(key, label, first, last) {
-      const buttons = Array.from({ length: last - first + 1 }, (_, j) => {
-        const n = first + j;
-        return `<button type="button" data-w="map-count-pick" data-v="${i}/${key}/${n}" aria-label="${esc(p.name)} ${label} ${n}" aria-pressed="${p[key] === n}">${n}</button>`;
-      }).join("");
-      return `<div class="number-choices" role="group" aria-label="${esc(p.name)} ${label}"><small>${label}</small><div>${buttons}</div></div>`;
-    }
-    return `<div class="count-name">${portrait("op:" + p.name)}<strong>${esc(p.name)}</strong></div>${choices("count", "数量", 1, 9)}${choices("elite", "精锐", 0, p.count)}`;
-  }
   let selected = "",
+    inspecting = false,
     job = 0,
     busy = false,
     runningKey = "",
@@ -35,6 +25,14 @@ const Maps = (() => {
       layouts: {},
       routes: true,
     });
+    if (!m.source) {
+      const held = QuickRoster.owned();
+      const same = m.pool.length === held.length && m.pool.every(p => held.some(u =>
+        u.name === p.name && p.count === u.count && p.elite === u.elite));
+      m.source = !m.pool.length || same ? "owned" : "trial";
+      if (!m.pool.length) m.pool = held;
+    }
+    if (m.tab === "owned") m.tab = "board";
     return m;
   }
   function sheet() {
@@ -50,8 +48,8 @@ const Maps = (() => {
   function current() {
     return W.data.garrison_maps.maps.find((x) => x.id === base().map);
   }
-  function candidates() {
-    return base().pool.flatMap((p) =>
+  function candidates(pool = base().pool) {
+    return pool.filter(p => !W.isBanned(p.name)).flatMap((p) =>
       Array.from({ length: p.count }, (_, i) => ({
         name: p.name,
         isElite: i < p.elite,
@@ -74,13 +72,7 @@ const Maps = (() => {
       (t === "H" && W.profiles[getName(key)]?.position !== "近战")
     );
   }
-  function selectPool(names) {
-    const s = base(),
-      old = new Map(s.pool.map((p) => [p.name, p]));
-    s.pool = names.map((n) => old.get(n) || { name: n, count: 1, elite: 0 });
-    sync();
-  }
-  function sync() {
+  function prune() {
     const keys = new Set(candidates().map((p) => p.key));
     for (const sh of Object.values(base().layouts)) {
       for (const k of Object.keys(sh.placed))
@@ -91,10 +83,63 @@ const Maps = (() => {
       sh.active = [];
     }
     if (!keys.has(selected)) selected = "";
+  }
+  function ownedChanged() {
+    if (!db.board) return;
+    const m = base();
+    if (m.source !== "owned") return;
+    const held = QuickRoster.owned();
+    if (JSON.stringify(held) === JSON.stringify(m.pool)) return;
+    cancelCalculation(false);
+    m.pool = held;
+    m.needsSolve = true;
+    prune();
+  }
+  function sync(solve = true) {
+    const m = base();
+    cancelCalculation(false);
+    prune();
+    m.needsSolve = true;
+    if (m.source === "owned") QuickRoster.setOwned(m.pool);
     persist();
-    render();
-    if (keys.size) void calculate("placement");
-    else cancelCalculation();
+    if (solve && m.pool.length) void calculate("placement");
+    else render();
+    renderBasket();
+  }
+  function showInitial() {
+    if (!busy && base().pool.length && !Object.keys(sheet().placed).length && !sheet().manual)
+      void calculate("placement");
+  }
+  function bansChanged() {
+    if (!db.board) return;
+    cancelCalculation(false);
+    prune();
+    base().needsSolve = true;
+  }
+  function restoreRosterSource() {
+    if (!db.promotionRulesMigrated) {
+      for (const name of Object.keys(db.run.counts)) QuickRoster.normalizeOwned(name);
+      if (db.board) {
+        const before = JSON.stringify(db.board.pool);
+        db.board.pool.forEach(QuickRoster.normalize);
+        const changed = before !== JSON.stringify(db.board.pool);
+        base();
+        if (changed || db.run.banned.length || db.run.bannedBonds.length) bansChanged();
+      }
+      db.promotionRulesMigrated = true;
+      persist();
+    } else if (db.board && (!db.board.source || db.board.tab === "owned")) {
+      base();
+      persist();
+    }
+  }
+  function savedField(req) {
+    const last = db.board?.layouts?.[req.map]?.recommended;
+    return last?.key === JSON.stringify(["placement-v1.9.4-1","placement",{...req,pins:{}}])
+      ? Object.keys(last.placed) : null;
+  }
+  function waitingForRoster() {
+    return db.page === "map" && db.board?.source === "owned" && (busy || (inspecting && db.board.needsSolve));
   }
   function moveTo(key, col, row) {
     const sh = sheet(),
@@ -136,13 +181,13 @@ const Maps = (() => {
     if (Object.keys(sheet().placed).length) void calculate("evaluate");
     else cancelCalculation();
   }
-  function cancelCalculation() {
+  function cancelCalculation(repaint = true) {
     if (!busy) return;
     ++job;
     busy = false;
     runningKey = "";
     W.stopMap();
-    if (db.page === "map") render();
+    if (repaint && db.page === "map") render();
   }
   function positions(keys, placed) {
     return Object.fromEntries(keys.filter(k => placed[k]).map(k => {
@@ -162,9 +207,10 @@ const Maps = (() => {
     if (action === "evaluate") req.cells = positions(Object.keys(sh.placed), sh.placed);
     const key = JSON.stringify(["placement-v1.9.4-1", action, req]);
     if (busy && runningKey === key) return;
-    cancelCalculation();
+    cancelCalculation(false);
     if (action === "placement" && sh.recommended?.key === key) {
       const { placed, total, active, checks } = sh.recommended;
+      m.needsSolve = false;
       Object.assign(sh, { placed: clone(placed), total, active, checks, manual: false });
       persist();
       render();
@@ -191,6 +237,7 @@ const Maps = (() => {
       );
       sh.total = result.total;
       if (action === "placement") {
+        m.needsSolve = false;
         sh.recommended = { key, placed: clone(sh.placed), total: result.total,
           active: result.activeCovenants, checks: result.checks };
         sh.manual = false;
@@ -207,6 +254,7 @@ const Maps = (() => {
         busy = false;
         runningKey = "";
         if (db.page === "map") render();
+        if (db.prefs.basketTab === "recommend") renderBasket();
       }
     }
   }
@@ -256,34 +304,23 @@ const Maps = (() => {
       sh = sheet(),
       map = current(),
       pool = candidates(),
+      byKey = new Map(pool.map(p => [p.key, p])),
       min = W.data.garrison_maps.columns[0];
     const selectedPiece = sh.placed[selected];
     const roles = ["输出", "承伤", "辅助", "叠层"];
     const sub = m.tab || "board";
     const tabs = `<div class="tracking-tabs">${[
       ["shop", "购买清单"],
-      ["owned", "干员状态"],
-      ["board", "地图模拟"],
+      ["recommend", "推荐阵容"],
+      ["board", "干员与地图"],
     ]
       .map(([id, name]) =>
         W.act("map-tab", name, sub === id ? "chosen" : "", id),
       )
       .join("")}</div>`;
     if (sub !== "board") {
-      if (sub === "owned") {
-        const names = Object.keys(db.run.counts).filter(
-          (n) => db.run.counts[n] > 0,
-        );
-        desk.innerHTML =
-          tabs +
-          section(
-            "实际拥有的干员",
-            W.act("owned", "编辑持有数量与精锐", "btn light"),
-          ) +
-          `<div class="unitgrid">${names.map((n) => `<div class="unit">${portrait("op:" + n)}<div><strong>${esc(n)}</strong><small>持有 ${db.run.counts[n]} · 精锐 ${db.run.elite[n] || 0}</small></div></div>`).join("")}</div>` +
-          (names.length
-            ? ""
-            : empty("尚未录入干员", "勾选已购干员或在这里编辑实际拥有池。"));
+      if (sub === "recommend") {
+        desk.innerHTML = tabs + RunLineups.view();
       } else {
         const t = active(),
           items = Teams.basketRows();
@@ -312,7 +349,7 @@ const Maps = (() => {
         ]),
       );
     const dots = new Set(),
-      selectedCandidate = pool.find((p) => p.key === selected),
+      selectedCandidate = byKey.get(selected),
       profile = selectedCandidate && W.profiles[selectedCandidate.name];
     if (selectedPiece && profile) {
       const range =
@@ -352,7 +389,7 @@ const Maps = (() => {
             k === selected && k ? "selected" : "",
             piece ? "occupied role-" + (piece.role ?? "bench") : "",
           ].join(" ");
-          return `<button class="${tileClass}" data-w="map-cell" data-v="${code}" aria-label="${esc(label + " " + types[type] + (k ? " " + k : ""))}" ${k ? `data-piece="${esc(k)}" draggable="true"` : ""}>${k ? `<span class="piece">${portrait("op:" + getName(k))}<b>${sh.pins.includes(k) ? "•" : ""}${faces[piece.facing]}</b></span>` : ""}</button>`;
+          return `<button class="${tileClass}" data-w="map-cell" data-v="${code}" aria-label="${esc(label + " " + types[type] + (k ? " " + k : ""))}" ${k ? `data-piece="${esc(k)}" draggable="true"` : ""}>${k ? `<span class="piece">${portrait("op:" + (byKey.get(k)?.name || k))}${byKey.get(k)?.isElite ? '<i class="tile-elite" aria-label="精锐">精</i>' : ""}<b>${sh.pins.includes(k) ? "•" : ""}${faces[piece.facing]}</b><span class="tile-name">${esc(k)}</span></span>` : ""}</button>`;
         }).join(""),
       )
       .join("");
@@ -363,7 +400,7 @@ const Maps = (() => {
       )
       .join("");
     const field = Object.keys(sh.placed)
-        .map((k) => pool.find((p) => p.key === k))
+        .map(k => byKey.get(k))
         .filter(Boolean),
       bench = pool.filter((p) => !sh.placed[p.key]),
       count = field.length;
@@ -400,19 +437,25 @@ const Maps = (() => {
             .join("")}</div>`
         : ""
     }</div>`;
-    desk.innerHTML = `<div class="deploy-layout">${tabs}<div class="map-head"><img alt="" src="img/${esc(map.id)}.webp"><div><strong>${esc(map.name)}</strong> <span>● 手动</span><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small></div><label class="map-change" aria-label="切换地图">⇄${W.select(
+    desk.innerHTML = `<div class="deploy-layout">${tabs}
+      <section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
+      <span>第 ${db.run.round} 回合 · 终端 ${db.run.terminal} 级${db.run.money == null ? "" : " · 资金 " + esc(db.run.money)}</span>
+      ${db.run.round < GuideModel.maxRound ? W.act("map-next-round","下一回合","linkbtn") : ""}</div>
+      <div id="map-run-panel" ${db.prefs.mapRunOpen ? "" : "hidden"}>${db.prefs.mapRunOpen ? W.runPanel() : ""}</div></section>
+      <div class="map-head"><img alt="" src="img/${esc(map.id)}.webp"><div><strong>${esc(map.name)}</strong> <span>● 手动</span><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small></div><label class="map-change" aria-label="切换地图">⇄${W.select(
       "map-id",
       W.data.garrison_maps.maps.map((z) => [z.id, z.name]),
       m.map,
     )}</label></div>
       <div class="deploy-modes"><div class="tracking-tabs">${["战斗", "平衡", "叠层"].map((n, i) => W.act("map-mode-set", n, m.mode === i ? "chosen" : "", "" + i)).join("")}</div><div class="tracking-tabs">${[8, 9].map((i) => W.act("map-count-set", i, m.people === i ? "chosen" : "", "" + i)).join("")}</div></div>
+      <div class="bench-head roster-bar"><strong>${m.source === "owned" ? "本局持有" : "阵容试摆"} · ${m.pool.length} 名</strong><span>共 ${pool.length} 份 · 精锐 ${pool.filter(p=>p.isElite).length} 份</span>${W.act("map-pool","快调干员","btn light")}</div>
       <article class="board-panel"><div class="board-shell"><div class="board-cols">${axisCols}</div><div class="board-rows">${axisRows}</div><div class="board">${grid}${m.routes ? routeLayer(map, min, m.filter || "both") : ""}</div></div>
-      <div class="plan-checks" aria-label="站位校验" aria-live="polite">${flags || `<span class="hint">${busy ? "正在计算站位校验…" : count ? "正在评估当前摆位…" : "选择干员并推荐站位后，显示盟约、上下路阻挡与治疗。"}</span>`}</div></article>
+      <div class="plan-checks" aria-label="站位校验" aria-live="polite">${flags || `<span class="hint">${busy ? "正在计算站位校验…" : m.needsSolve ? "持有数量已更新，可继续调整或重新推荐站位。" : count ? "正在评估当前摆位…" : "选择干员并推荐站位后，显示盟约、上下路阻挡与治疗。"}</span>`}</div></article>
+      ${selected ? `<div class="selected-piece"><strong>${esc(selected)}${roles[selectedPiece?.role] ? " · " + roles[selectedPiece.role] : ""}</strong>${inspecting && selectedCandidate ? QuickRoster.numbers(m.pool.find(p=>p.name === selectedCandidate.name),"map-number") : ""}<div class="actions">${inspecting && selectedPiece ? W.act("map-arm-move","移动 / 换位") : ""}${selectedPiece ? W.act("map-turn", "转向 " + faces[selectedPiece.facing]) + W.act("map-pin", sh.pins.includes(selected) ? "解除固定" : "固定位置") + W.act("map-bench", "下场") : "<small>点一个可用格子部署</small>"}${m.needsSolve ? W.act("map-finish-edit", "完成并推荐站位", "btn gold") : ""}${W.act("map-deselect", "收起", "linkbtn")}</div>${!m.needsSolve && selectedPiece?.notes ? `<p class="hint">${esc(selectedPiece.notes.join(" · "))}</p>` : ""}</div>` : ""}
       ${field.length ? `<div class="deploy-roster">${field.map(card).join("")}</div>` : ""}
-      ${selected ? `<div class="selected-piece"><strong>${esc(selected)}${roles[selectedPiece?.role] ? " · " + roles[selectedPiece.role] : ""}</strong><div class="actions">${selectedPiece ? W.act("map-turn", "转向 " + faces[selectedPiece.facing]) + W.act("map-pin", sh.pins.includes(selected) ? "解除固定" : "固定位置") + W.act("map-bench", "下场") : "<small>点一个可用格子部署</small>"}${W.act("map-deselect", "取消选择", "linkbtn")}</div>${selectedPiece?.notes ? `<p class="hint">${esc(selectedPiece.notes.join(" · "))}</p>` : ""}</div>` : ""}
       <div class="bench-head"><strong>整备区 · ${bench.length} 人</strong><span>上场 ${count} · 已获取 ${new Set(pool.map((p) => p.name)).size} 名</span>${W.act("map-pool", "干员池 ›", "linkbtn")}</div>
       ${bench.length ? `<div class="deploy-roster">${bench.map(card).join("")}</div>` : ""}
-      <div class="deploy-tools actions">${W.act("map-solve", busy ? status : "推荐站位", "btn gold")}${busy ? W.act("map-cancel", "取消计算", "linkbtn") : ""}${W.act("map-team", "使用当前阵容")}${W.act("map-owned", "使用实际拥有池")}${W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
+      <div class="deploy-tools actions">${W.act("map-solve", busy ? status : m.needsSolve && count ? "更新推荐站位" : "推荐站位", "btn gold")}${busy ? W.act("map-cancel", "取消计算", "linkbtn") : ""}${W.act("map-team", "使用当前阵容")}${W.act("map-owned", "使用实际拥有池")}${W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
       ${legend}${sh.manual && sh.recommended && sh.total !== null ? `<div class="actions"><p class="hint">手动摆位 · 较推荐 ${Math.round((sh.total - sh.recommended.total) * 10) / 10}</p>${W.act("map-restore", "恢复推荐站位", "linkbtn")}</div>` : ""}</div>`;
     const cols = bounds.right - bounds.left + 1;
     desk
@@ -423,6 +466,18 @@ const Maps = (() => {
       .style.setProperty("--rows", String(bounds.rows));
   }
   async function click(a, v) {
+    if (a === "map-run-toggle") {
+      db.prefs.mapRunOpen = !db.prefs.mapRunOpen;
+      persist(); render();
+      return;
+    }
+    if (a === "map-next-round") {
+      db.run.round = Math.min(GuideModel.maxRound, db.run.round+1);
+      Economy.changed(db.run, "round");
+      if (db.prefs.autoStage) Teams.roundChanged();
+      persist(); render(); renderBasket();
+      return;
+    }
     if (a === "map-cancel") {
       cancelCalculation();
       return;
@@ -462,53 +517,23 @@ const Maps = (() => {
       eligible = Object.keys(W.profiles).filter(
         (n) => W.profiles[n]?.normalRange?.base,
       );
-    if (a === "map-pool") {
-      W.picker(
-        "选择可部署干员",
-        W.opChoices(eligible),
-        m.pool.map((p) => p.name),
-        selectPool,
-        35,
-      );
+    if (a === "map-pool" || a === "map-counts") {
+      cancelCalculation(false);
+      QuickRoster.open({title:m.source === "owned" ? "快调本局干员" : "快调试摆干员",
+        pool:m.pool, names:(m.source === "owned" ? Object.keys(W.rawOps) : eligible).filter(n=>!W.isBanned(n)), only:a === "map-counts",
+        apply(pool) { m.pool = pool; inspecting = false; sync(); }
+      });
       return;
     }
     if (a === "map-team" || a === "map-owned") {
-      const entries =
-        a === "map-team"
-          ? active()
-              ?.stages[stageNum(active() || { stages: [{}] })].entries.filter(
-                (e) => e.key.startsWith("op:"),
-              )
-              .map((e) => e.key.slice(3))
-          : Object.keys(db.run.counts).filter((n) => db.run.counts[n] > 0);
-      if (!entries?.length) {
-        toast(
-          a === "map-team"
-            ? "先打开或新建一套阵容"
-            : "先到对局页录入实际拥有的干员",
-        );
-        return;
-      }
-      const names = [...new Set(entries)].filter((n) => eligible.includes(n));
-      if (!names.length) {
-        toast("这些干员缺少部署资料");
-        return;
-      }
-      m.pool = names.map((n) => ({
-        name: n,
-        count:
-          a === "map-owned"
-            ? db.run.counts[n]
-            : entries.filter((k) => k === n).length,
-        elite:
-          a === "map-owned"
-            ? db.run.elite[n] || 0
-            : active().stages[stageNum(active())].entries.find(
-                  (e) => e.key === "op:" + n,
-                )?.elite
-              ? 1
-              : 0,
-      }));
+      const team = active();
+      if (a === "map-team" && !team) { toast("先打开或新建一套阵容"); return; }
+      const pool = a === "map-owned" ? QuickRoster.owned() :
+        QuickRoster.fromStage(team.stages[stageNum(team)]).filter(p=>eligible.includes(p.name));
+      if (a === "map-team" && !pool.length) { toast("当前阶段没有可部署干员"); return; }
+      m.source = a === "map-owned" ? "owned" : "trial";
+      m.pool = pool;
+      inspecting = false;
       sync();
       return;
     }
@@ -516,7 +541,20 @@ const Maps = (() => {
       if (!busy) await calculate(a === "map-solve" ? "placement" : "evaluate");
       return;
     }
+    if (a === "map-finish-edit") {
+      inspecting = false;
+      selected = "";
+      await calculate("placement");
+      return;
+    }
+    if (a === "map-arm-move") {
+      inspecting = false;
+      toast("点目标格移动或换位");
+      render();
+      return;
+    }
     if (a === "map-piece") {
+      inspecting = false;
       selected = v;
       render();
       return;
@@ -526,9 +564,11 @@ const Maps = (() => {
       const currentKey = Object.keys(sh.placed).find(
         (k) => sh.placed[k].cell.col === x && sh.placed[k].cell.row === y,
       );
-      if (selected) {
+      if (selected && !inspecting) {
         moveTo(selected, x, y);
       } else if (currentKey) {
+        cancelCalculation(false);
+        inspecting = true;
         selected = currentKey;
         render();
       } else toast("先从下方选择一名干员");
@@ -557,33 +597,18 @@ const Maps = (() => {
       invalidate();
       return;
     }
-    if (a === "map-counts") {
-      countDraft = m.pool.map((p) => ({ ...p }));
-      popup(
-        `<h2>数量与精锐</h2><div class="count-list">${countDraft.map((p, i) => `<div class="count-row" id="count-row-${i}">${countRow(p, i)}</div>`).join("") || "<p>先选择干员池，再设置数量。</p>"}</div><div class="actions count-footer">${W.act("map-count-save", "保存", "btn gold")}${button("cancel", "取消", "btn light")}</div>`,
-      );
-      return;
-    }
-    if (a === "map-count-pick") {
-      const [index, key, n] = v.split("/"),
-        p = countDraft[Number(index)],
-        num = Number(n);
-      if (!p || !Number.isInteger(num)) return;
-      if (key === "count" && num >= 1 && num <= 9) {
-        p.count = num;
-        p.elite = Math.min(p.elite, num);
-      }
-      if (key === "elite" && num >= 0 && num <= p.count) p.elite = num;
-      $("count-row-" + index).innerHTML = countRow(p, Number(index));
-      return;
-    }
-    if (a === "map-count-save") {
-      m.pool = countDraft.map((p) => ({ ...p }));
-      close();
-      sync();
-      return;
-    }
   }
+  document.addEventListener("click", e => {
+    const b = e.target.closest("[data-map-number]");
+    if (!b || !selected || !inspecting || db.page !== "map") return;
+    const name = getName(selected);
+    const m = base(), unit = m.pool.find(p=>p.name === name);
+    if (!unit) return;
+    QuickRoster.setNumber(unit, b.dataset.mapNumber, Number(b.dataset.number));
+    if (!unit.count) m.pool = m.pool.filter(p=>p !== unit);
+    if (!candidates().some(p=>p.key === selected)) selected = unit.count ? name : "";
+    sync(false);
+  });
   document.addEventListener("change", (e) => {
     if (!db || db.page !== "map") return;
     const m = base(),
@@ -630,5 +655,5 @@ const Maps = (() => {
     selected = k;
     moveTo(k, ...tile.dataset.v.split(",").map(Number));
   });
-  return { render, click };
+  return { render, click, candidates, ownedChanged, showInitial, savedField, waitingForRoster, restoreRosterSource, bansChanged };
 })();

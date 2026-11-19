@@ -61,10 +61,11 @@ const Workbench = (() => {
     const savedRun = db.run || {};
     const selected = Array.isArray(savedRun.enemyTypes) ? savedRun.enemyTypes : [savedRun.enemy];
     db.run = Object.assign(defaults(), savedRun, {
+      money: Economy.balance(savedRun.money),
       enemyTypes: Object.keys(data.enemy_types.types).filter(code => selected.includes(code)),
     });
     delete db.run.enemy;
-    if (Object.hasOwn(savedRun, "enemy") ||
+    if (savedRun.money !== db.run.money || Object.hasOwn(savedRun, "enemy") ||
         JSON.stringify(savedRun.enemyTypes) !== JSON.stringify(db.run.enemyTypes)) persist();
     db.run.round = Math.max(
       1,
@@ -162,13 +163,35 @@ const Workbench = (() => {
   function isBanned(name) {
     const op = rawOps[name];
     if (!op) return false;
-    const bonds = op.coreCovenants.length
-      ? op.coreCovenants
-      : op.additionalCovenants;
     return (
       db.run.banned.includes(name) ||
-      (bonds.length > 0 && bonds.every((x) => db.run.bannedBonds.includes(x)))
+      bannedByBonds(op, db.run.bannedBonds)
     );
+  }
+  function bannedByBonds(op, bonds) {
+    return op.coreCovenants.some(b => bonds.includes(b)) ||
+      (op.additionalCovenants.length > 0 && op.additionalCovenants.every(b => bonds.includes(b)));
+  }
+  function coreBanned(bond) {
+    return db.run.bannedBonds.includes(bond) && data.covenants.covenants.some(b => b.name === bond && b.bondType === "SEASON");
+  }
+  function banBondsDialog() {
+    const group = (core, label) => `<fieldset class="training-enemies"><legend>${label}</legend><div>${data.covenants.covenants
+      .filter(b => (b.bondType === "SEASON") === core)
+      .map(b => `<label><input type="checkbox" name="ban-covenant" value="${esc(b.name)}" ${db.run.bannedBonds.includes(b.name) ? "checked" : ""}>${esc(b.name)}</label>`).join("")}</div></fieldset>`;
+    popup(`<h2>本局置灰盟约</h2>${group(true,"大盟约 · 成员全部禁用")}${group(false,"小盟约 · 所有附加盟约都置灰的干员禁用")}
+      <details><summary id="ban-rule-total"></summary><p id="ban-rule-names"></p></details>
+      <div class="actions">${act("ban-bonds-save","应用本局禁用","btn gold")}${button("cancel","取消","btn light")}</div>`);
+    previewBans();
+  }
+  function selectedBans() {
+    return [...body.querySelectorAll('[name="ban-covenant"]:checked')].map(el=>el.value);
+  }
+  function previewBans() {
+    const selected = selectedBans();
+    const names = Object.values(rawOps).filter(op=>bannedByBonds(op, selected)).map(op=>op.name);
+    $("ban-rule-total").textContent = "按盟约禁用 " + names.length + " 名干员";
+    $("ban-rule-names").textContent = names.join("、") || "无";
   }
   function act(name, label, cls = "btn light", v = "") {
     return `<button type="button" class="${cls}" data-w="${esc(name)}" data-v="${esc(v)}">${esc(label)}</button>`;
@@ -306,7 +329,7 @@ const Workbench = (() => {
     if (db.page === "atlas") atlas();
     if (db.page === "map") Maps.render();
     if (db.page === "planner") Planning.render();
-    if (db.page === "run") runPage();
+
     if (db.page === "prefs") prefs();
     return true;
   }
@@ -509,7 +532,7 @@ const Workbench = (() => {
         <p>后半程 · ${esc(type.secondHalfVariants.map(e => e.enemyName).join("、"))}</p></article>`;
     }).join("");
   }
-  function runPage() {
+  function runPanel() {
     const r = db.run,
       boss = data.bosses.bosses.find((b) => b.name === r.boss),
       hp = boss?.hp.find((h) => h.mode === r.mode);
@@ -517,9 +540,7 @@ const Workbench = (() => {
       ["mode_training_2", "入门协议"],
       ...data.bosses.bosses[0].hp.map((h) => [h.mode, h.name]),
     ];
-    desk.innerHTML =
-      head("对局信息", "手动记录本局状态，禁用选择会同步到图鉴和阵容规划。") +
-      section("回合与商店") +
+    return section("回合与商店") +
       `<div class="filtergrid">
       ${[
         ["round", "回合", 1, GuideModel.maxRound],
@@ -532,46 +553,43 @@ const Workbench = (() => {
           ),
         )
         .join("")}</div>
-      ${Economy.view(r, data.economy, Workbench)}${section("本局禁用")}<div class="actions">${act("ban-bonds", "禁用盟约 · " + r.bannedBonds.length)}${act("ban-ops", "禁用干员 · " + r.banned.length)}</div><div class="tags controls">${[...r.bannedBonds, ...r.banned].map(tag).join("")}</div>
+      ${Economy.view(r, data.economy, Workbench)}${section("本局禁用")}<div class="actions">${act("ban-bonds", "禁用盟约 · " + r.bannedBonds.length)}${act("ban-ops", "额外禁用干员 · " + r.banned.length)}</div><div class="tags controls">${[...r.bannedBonds, ...r.banned].map(tag).join("")}</div>
       ${section("敌方领袖与特训敌人")}<div class="filtergrid">${control("模式 / 规程等级", select("run-mode", modes, r.mode))}${control("敌方领袖", select("run-boss", [["", "未选择"], ...data.bosses.bosses.map((b) => b.name)], r.boss))}</div>
       <fieldset class="training-enemies"><legend>特训敌人（可多选）</legend>
         <div>${Object.entries(data.enemy_types.types).map(([code, type]) => `<label><input type="checkbox" name="training-enemy" value="${esc(code)}"${r.enemyTypes.includes(code) ? " checked" : ""}>${esc(type.typeName)}</label>`).join("")}</div>
       </fieldset><div id="training-enemy-details">${trainingEnemyDetails()}</div>
       ${boss ? `<article class="note"><strong>${esc(boss.name)}</strong><p>${esc(boss.description)}</p>${hp ? `<h4>${esc(hp.name)} · 生命 ${Number(hp.hp).toLocaleString()}${hp.hiddenHp ? " · 隐藏形态 " + Number(hp.hiddenHp).toLocaleString() : ""}</h4>` : ""}<ul>${boss.abilityList.map((v) => `<li>${esc(v.replace(/<[^>]+>/g, ""))}</li>`).join("")}</ul><details><summary>各难度生命值</summary>${boss.hp.map((h) => `<p>${esc(h.name)}　${h.hp.toLocaleString()}${h.hiddenHp ? " / " + h.hiddenHp.toLocaleString() : ""}</p>`).join("")}</details></article>` : ""}
-      ${section("干员状态")}<div class="actions">${act("owned", "管理实际拥有池")}${act("new-run", "开始新局", "btn light danger")}</div>`;
+      <div class="actions">${act("new-run", "开始新局", "btn light danger")}</div>`;
   }
   function ownedDialog() {
-    popup(
-      `<h2>实际拥有池</h2><div class="actions">${act("owned-choose", "选择拥有的干员")}${act("owned-checklist", "从已购清单补入")}</div><div class="listbox controls">${Object.keys(
-        db.run.counts,
-      )
-        .filter((k) => db.run.counts[k] > 0)
-        .map(
-          (n) =>
-            `<div class="toolbar listrow"><span>${esc(n)} × ${db.run.counts[n]}　精锐 ${db.run.elite[n] || 0}</span><div>${act("qty-minus", "−", "chip", n)}${act("qty-plus", "＋", "chip", n)}${act("elite-change", "调整精锐", "chip", n)}</div></div>`,
-        )
-        .join("")}</div>`,
-    );
+    QuickRoster.open({title:"快调本局干员", pool:QuickRoster.owned(), names:Object.keys(rawOps).filter(n=>!isBanned(n)), addBought:true,
+      apply(pool) {
+        QuickRoster.setOwned(pool);
+        Maps.ownedChanged();
+        persist();
+        render();
+      }
+    });
   }
   async function click(a, v) {
+    if (a === "run") {
+      db.prefs.mapRunOpen = true;
+      if (db.board) db.board.tab = "board";
+      move("map");
+      return;
+    }
     if (pages.includes(a)) {
       if (a === "map" && db.board) db.board.tab = "board";
       move(a);
+      if (a === "map") Maps.showInitial();
       return;
     }
     const f = filterState(),
       p = db.prefs,
       r = db.run;
-    if (["money-1", "money+1", "money-use", "price-auto"].includes(a)) {
+    if (a === "money-use" || a === "price-auto") {
       if (a === "price-auto") r.upgrade = null;
-      else
-        r.money =
-          a === "money-use"
-            ? Number(v)
-            : Math.max(
-                0,
-                Math.min(9999, (r.money || 0) + (a === "money-1" ? -1 : 1)),
-              );
+      else r.money = Economy.balance(v);
       persist();
       render();
       return;
@@ -688,6 +706,7 @@ const Workbench = (() => {
     }
     if (a === "atlas-ban") {
       r.banned = toggleList(r.banned, info(v).name);
+      Maps.bansChanged();
       persist();
       close();
       render();
@@ -700,16 +719,22 @@ const Workbench = (() => {
       );
       return;
     }
+    if (a === "ban-bonds") { banBondsDialog(); return; }
+    if (a === "ban-bonds-save") {
+      r.bannedBonds = selectedBans();
+      Maps.bansChanged();
+      persist();
+      close();
+      render();
+      return;
+    }
     if (
-      a === "ban-bonds" ||
       a === "ban-ops" ||
       a === "custom" ||
       a === "multi-choose"
     ) {
       const opts =
-        a === "ban-bonds"
-          ? data.covenants.covenants.map((c) => c.name)
-          : a === "multi-choose"
+        a === "multi-choose"
             ? db.teams.map((t) => ({ id: t.id, name: t.title }))
             : opChoices(
                 a === "custom"
@@ -718,7 +743,6 @@ const Workbench = (() => {
               );
       const obj = a.startsWith("ban") ? r : p,
         k = {
-          "ban-bonds": "bannedBonds",
           "ban-ops": "banned",
           custom: "custom",
           "multi-choose": "tracked",
@@ -726,7 +750,6 @@ const Workbench = (() => {
       picker(
         "选择" +
           {
-            bannedBonds: "禁用盟约",
             banned: "禁用干员",
             custom: "自选干员",
             tracked: "追踪阵容",
@@ -735,6 +758,7 @@ const Workbench = (() => {
         obj[k],
         (vals) => {
           obj[k] = vals;
+          if (a === "ban-ops") Maps.bansChanged();
           persist();
           render();
         },
@@ -742,45 +766,6 @@ const Workbench = (() => {
       return;
     }
     if (a === "owned") {
-      ownedDialog();
-      return;
-    }
-    if (a === "owned-choose") {
-      picker(
-        "选择实际拥有的干员",
-        opChoices(),
-        Object.keys(r.counts).filter((n) => r.counts[n] > 0),
-        (vals) => {
-          r.counts = Object.fromEntries(vals.map((n) => [n, r.counts[n] || 1]));
-          for (const n of Object.keys(r.elite))
-            if (!r.counts[n]) delete r.elite[n];
-          persist();
-          ownedDialog();
-        },
-      );
-      return;
-    }
-    if (a === "owned-checklist") {
-      for (const t of db.teams)
-        for (const token of t.owned) {
-          const [k, n] = JSON.parse(token);
-          if (k.startsWith("op:"))
-            r.counts[k.slice(3)] = Math.max(r.counts[k.slice(3)] || 0, n);
-        }
-      persist();
-      ownedDialog();
-      return;
-    }
-    if (["qty-minus", "qty-plus", "elite-change"].includes(a)) {
-      let count = r.counts[v] || 0;
-      if (a === "qty-plus") count = Math.min(9, count + 1);
-      if (a === "qty-minus") count = Math.max(0, count - 1);
-      r.counts[v] = count;
-      r.elite[v] =
-        a === "elite-change"
-          ? ((r.elite[v] || 0) + 1) % (count + 1)
-          : Math.min(r.elite[v] || 0, count);
-      persist();
       ownedDialog();
       return;
     }
@@ -834,6 +819,7 @@ const Workbench = (() => {
     if (!db) return;
     const e = ev.target,
       k = e.id.replace(/^.*?-/, "");
+    if (e.name === "ban-covenant") { previewBans(); return; }
     if (e.name === "training-enemy") {
       db.run.enemyTypes = Array.from(desk.querySelectorAll('input[name="training-enemy"]:checked'), box => box.value);
       persist();
@@ -880,6 +866,7 @@ const Workbench = (() => {
   return {
     initialize,
     renderPage,
+    runPanel,
     data,
     profiles,
     rawOps,
@@ -888,12 +875,14 @@ const Workbench = (() => {
     engine,
     stopEngine: plannerWorker.stop,
     stopMap: mapWorker.stop,
+    engineWorker,
     act,
     select,
     control,
     picker,
     opChoices,
     isBanned,
+    coreBanned,
     head,
     applyTheme,
     ownedDialog,

@@ -26,7 +26,6 @@ const PointControls = (() => {
       "range-b": "结束回合",
       "run-round": "回合",
       "run-terminal": "终端等级",
-      "run-money": "资金",
       "run-upgrade": "升级价",
     };
     return (
@@ -151,34 +150,6 @@ const PointControls = (() => {
     const min = Number(el.min || 0),
       max = Number(el.max || 99),
       current = el.value === "" ? null : Number(el.value);
-    if (el.id === "run-money") {
-      const decade =
-          bucket === "" ? Math.floor((current ?? 0) / 10) : Number(bucket),
-        low = decade * 10;
-      const presets = Array.from({ length: 10 }, (_, i) => low + i).filter(
-        (n) => n <= max,
-      );
-      const nearby = [...new Set([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, decade])].sort(
-        (a, b) => a - b,
-      );
-      return (
-        '<p class="hint">先选金额段，再点实际余额。</p><div class="point-groups">' +
-        nearby
-          .map((n) =>
-            option(n * 10 + "–" + (n * 10 + 9), n, decade === n, "bucket"),
-          )
-          .join("") +
-        option(
-          "更高金额 ›",
-          Math.min(999, Math.max(10, decade + 1)),
-          false,
-          "bucket",
-        ) +
-        '</div><div class="point-grid">' +
-        presets.map((n) => option(n, n, n === current)).join("") +
-        "</div>"
-      );
-    }
     if (max <= 99) {
       const options = Array.from({ length: max - min + 1 }, (_, i) => i + min);
       let area = options;

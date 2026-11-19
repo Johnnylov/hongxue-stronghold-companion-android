@@ -10,8 +10,8 @@ namespace ASPAssistant.Core.Services;
 public static class CovenantBanRules
 {
     /// <summary>
-    /// All core covenants banned makes an operator unavailable, regardless of additional covenants.
-    /// Operators without a core covenant are unavailable only when all their additional covenants are banned.
+    /// A grey core covenant excludes all its members. Grey additional covenants exclude an
+    /// operator when the operator has at least one additional covenant and every one is grey.
     /// </summary>
     public static bool IsExcluded(Operator op, IReadOnlySet<string> bannedCovenants)
         => IsExcluded(op.CoreCovenants, op.AdditionalCovenants, bannedCovenants);
@@ -19,9 +19,8 @@ public static class CovenantBanRules
     public static bool IsExcluded(IEnumerable<string> core, IEnumerable<string> additional, IReadOnlySet<string> bannedCovenants)
     {
         if (bannedCovenants.Count == 0) return false;
-        var relevant = core.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.Ordinal).ToList();
-        if (relevant.Count == 0)
-            relevant = additional.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct(StringComparer.Ordinal).ToList();
-        return relevant.Count > 0 && relevant.All(bannedCovenants.Contains);
+        if (core.Any(bannedCovenants.Contains)) return true;
+        var small = additional.Where(c => !string.IsNullOrWhiteSpace(c)).ToArray();
+        return small.Length > 0 && small.All(bannedCovenants.Contains);
     }
 }
