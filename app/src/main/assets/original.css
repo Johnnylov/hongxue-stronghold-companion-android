@@ -993,3 +993,37 @@ input.search + .point-input {
   color: var(--muted);
   font-size: 13px;
 }
+
+.training-enemies {
+  border: 0;
+  margin: 14px 0 8px;
+  padding: 0;
+}
+.training-enemies legend {
+  padding: 0;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.training-enemies > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.training-enemies label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 12px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.training-enemies input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.training-enemies label:has(:checked) {
+  background: var(--tint);
+  border-color: var(--accent);
+}

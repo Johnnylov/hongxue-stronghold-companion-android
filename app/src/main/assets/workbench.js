@@ -32,7 +32,7 @@ const Workbench = (() => {
     upgrade: null,
     mode: "mode_single_funny",
     boss: "",
-    enemy: "",
+    enemyTypes: [],
     elite: {},
     counts: {},
     picked: [],
@@ -58,7 +58,14 @@ const Workbench = (() => {
       data.operator_profiles.operators,
       data.custom_operator_profiles.operators,
     );
-    db.run = Object.assign(defaults(), db.run);
+    const savedRun = db.run || {};
+    const selected = Array.isArray(savedRun.enemyTypes) ? savedRun.enemyTypes : [savedRun.enemy];
+    db.run = Object.assign(defaults(), savedRun, {
+      enemyTypes: Object.keys(data.enemy_types.types).filter(code => selected.includes(code)),
+    });
+    delete db.run.enemy;
+    if (Object.hasOwn(savedRun, "enemy") ||
+        JSON.stringify(savedRun.enemyTypes) !== JSON.stringify(db.run.enemyTypes)) persist();
     db.run.round = Math.max(
       1,
       Math.min(GuideModel.maxRound, Number(db.run.round) || 1),
@@ -494,10 +501,17 @@ const Workbench = (() => {
       <div class="actions">${act("multi-choose", "选择追踪阵容")}${act("custom", "自选干员（" + p.custom.length + "）")}</div>
       ${section("移植版")}<div class="actions">${button("about", "版本与来源")}${act("updates", "查看 GitHub 发布版")}${act("backup", "备份 / 恢复本机数据")}</div>`;
   }
+  function trainingEnemyDetails() {
+    return db.run.enemyTypes.map(code => {
+      const type = data.enemy_types.types[code];
+      return `<article class="note" data-enemy-detail="${esc(code)}"><strong>${esc(type.typeName)}</strong>
+        <p>前半程 · ${esc(type.firstHalfVariants.map(e => e.enemyName).join("、"))}</p>
+        <p>后半程 · ${esc(type.secondHalfVariants.map(e => e.enemyName).join("、"))}</p></article>`;
+    }).join("");
+  }
   function runPage() {
     const r = db.run,
       boss = data.bosses.bosses.find((b) => b.name === r.boss),
-      type = data.enemy_types.types[r.enemy],
       hp = boss?.hp.find((h) => h.mode === r.mode);
     const modes = [
       ["mode_training_2", "入门协议"],
@@ -519,9 +533,11 @@ const Workbench = (() => {
         )
         .join("")}</div>
       ${Economy.view(r, data.economy, Workbench)}${section("本局禁用")}<div class="actions">${act("ban-bonds", "禁用盟约 · " + r.bannedBonds.length)}${act("ban-ops", "禁用干员 · " + r.banned.length)}</div><div class="tags controls">${[...r.bannedBonds, ...r.banned].map(tag).join("")}</div>
-      ${section("敌方领袖与特训敌人")}<div class="filtergrid">${control("模式 / 规程等级", select("run-mode", modes, r.mode))}${control("敌方领袖", select("run-boss", [["", "未选择"], ...data.bosses.bosses.map((b) => b.name)], r.boss))}${control("特训敌人类型", select("run-enemy", [["", "未选择"], ...Object.entries(data.enemy_types.types).map(([k, v]) => [k, v.typeName])], r.enemy))}</div>
+      ${section("敌方领袖与特训敌人")}<div class="filtergrid">${control("模式 / 规程等级", select("run-mode", modes, r.mode))}${control("敌方领袖", select("run-boss", [["", "未选择"], ...data.bosses.bosses.map((b) => b.name)], r.boss))}</div>
+      <fieldset class="training-enemies"><legend>特训敌人（可多选）</legend>
+        <div>${Object.entries(data.enemy_types.types).map(([code, type]) => `<label><input type="checkbox" name="training-enemy" value="${esc(code)}"${r.enemyTypes.includes(code) ? " checked" : ""}>${esc(type.typeName)}</label>`).join("")}</div>
+      </fieldset><div id="training-enemy-details">${trainingEnemyDetails()}</div>
       ${boss ? `<article class="note"><strong>${esc(boss.name)}</strong><p>${esc(boss.description)}</p>${hp ? `<h4>${esc(hp.name)} · 生命 ${Number(hp.hp).toLocaleString()}${hp.hiddenHp ? " · 隐藏形态 " + Number(hp.hiddenHp).toLocaleString() : ""}</h4>` : ""}<ul>${boss.abilityList.map((v) => `<li>${esc(v.replace(/<[^>]+>/g, ""))}</li>`).join("")}</ul><details><summary>各难度生命值</summary>${boss.hp.map((h) => `<p>${esc(h.name)}　${h.hp.toLocaleString()}${h.hiddenHp ? " / " + h.hiddenHp.toLocaleString() : ""}</p>`).join("")}</details></article>` : ""}
-      ${type ? section(type.typeName) + ["firstHalfVariants", "secondHalfVariants"].map((k, i) => `<p>${i ? "后半程" : "前半程"} · ${esc(type[k].map((e) => e.enemyName).join("、"))}</p>`).join("") : ""}
       ${section("干员状态")}<div class="actions">${act("owned", "管理实际拥有池")}${act("new-run", "开始新局", "btn light danger")}</div>`;
   }
   function ownedDialog() {
@@ -818,6 +834,12 @@ const Workbench = (() => {
     if (!db) return;
     const e = ev.target,
       k = e.id.replace(/^.*?-/, "");
+    if (e.name === "training-enemy") {
+      db.run.enemyTypes = Array.from(desk.querySelectorAll('input[name="training-enemy"]:checked'), box => box.value);
+      persist();
+      $("training-enemy-details").innerHTML = trainingEnemyDetails();
+      return;
+    }
     if (e.id.startsWith("pref-")) {
       db.prefs[k] =
         e.type === "checkbox"
