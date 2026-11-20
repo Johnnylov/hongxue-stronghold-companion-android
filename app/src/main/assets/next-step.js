@@ -126,9 +126,8 @@ const NextStep = (() => {
     const names=gaps.map(u=>u.name+"（"+Planning.recruitment(u.name).label+"）").join("、");
     return `<p class="round-guide"><b>攻略 · ${esc(s.label)}</b>　${names?"待补 "+esc(names):blocked.length?"":"可用人选已齐"}${blocked.length?"　暂不可用 "+esc(blocked.join("、")):""}</p>`;
   }
-  function routeResult(title,route,advice,final=false) {
-    const run=db.run, last=run.round===GuideModel.maxRound;
-    const entry=Planning.routeEntry(route,advice,run.terminal,final || last);
+  function routeAction(entry) {
+    const run=db.run;
     const budget=Economy.budget(run,W.data.economy), upgrade=Economy.price(run,W.data.economy);
     let action="";
     if(entry?.stage.isFinal || entry?.preview) {
@@ -144,6 +143,12 @@ const NextStep = (() => {
     } else if(entry) {
       action=PlanMatch.levelAction(entry.level,{terminal:run.terminal,money:budget.money,upgrade});
     }
+    return action;
+  }
+  function routeResult(title,route,advice,final=false) {
+    const run=db.run, last=run.round===GuideModel.maxRound;
+    const entry=Planning.routeEntry(route,advice,run.terminal,final || last);
+    const action=routeAction(entry);
     const decision=action?`<p class="round-action" data-action-round="${run.round}"><b>${last?"末回合":"本回合"}先做</b>　${esc(action)}</p>`:"";
     return decision+`<p class="route-source">${esc(title)}</p>`+Planning.routePanel(entry,true);
   }
@@ -243,5 +248,5 @@ const NextStep = (() => {
     }).join("");
     return `<details class="plan-progression"><summary>各本怎么走</summary><ol>${rows}</ol></details>`;
   }
-  return {view, progression, retry};
+  return {view, progression, retry, routeAction};
 })();

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import mirror_deps
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -33,21 +34,23 @@ classes = out / "classes"
 if classes.exists():
     shutil.rmtree(classes)
 classes.mkdir()
+mirror_jars = mirror_deps.prepare()
 run(tools / ("aapt2" + suffix), "compile", "--dir", main / "res", "-o", out / "compiled.zip")
 run(tools / ("aapt2" + suffix), "link", "-o", out / "base.apk", "-I", android,
     "--manifest", main / "AndroidManifest.xml", "-A", main / "assets", out / "compiled.zip")
 bootpath = os.pathsep.join(map(str, (android, tools / "core-lambda-stubs.jar")))
 run(jdk("javac"), "-encoding", "UTF-8", "-source", "8", "-target", "8", "-bootclasspath", bootpath,
-    "-d", classes, *main.glob("java/**/*.java"))
+    "-classpath", os.pathsep.join(map(str,mirror_jars)), "-d", classes, *main.glob("java/**/*.java"))
 run(jdk("jar"), "cf", out / "classes.jar", "-C", classes, ".")
 run(jdk("java"), "-cp", tools / "lib/d8.jar", "com.android.tools.r8.D8",
-    "--release", "--min-api", "26", "--lib", android, "--output", out, out / "classes.jar")
+    "--release", "--min-api", "26", "--lib", android, "--output", out, out / "classes.jar", *mirror_jars)
 with zipfile.ZipFile(out / "base.apk") as base, zipfile.ZipFile(out / "unsigned.apk", "w") as apk:
     for entry in base.infolist():
         apk.writestr(entry.filename, base.read(entry), compress_type=entry.compress_type)
     apk.write(out / "classes.dex", "classes.dex", compress_type=zipfile.ZIP_DEFLATED)
+    mirror_deps.package(apk)
 run(tools / ("zipalign" + suffix), "-f", "4", out / "unsigned.apk", out / "aligned.apk")
-apk = out / "Matou-Tablet-v1.0.9.apk"
+apk = out / "Matou-Tablet-v1.1.0.apk"
 signer = [jdk("java"), "-jar", tools / "lib/apksigner.jar"]
 run(*signer, "sign", "--ks", args.keystore, "--ks-key-alias", args.alias,
     "--ks-pass", "env:HX_STORE_PASS", "--key-pass", "env:HX_STORE_PASS",

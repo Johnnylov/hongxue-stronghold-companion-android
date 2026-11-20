@@ -30,6 +30,18 @@ public final class MainActivity extends Activity {
     private static final String HOST = "appassets.androidplatform.net";
     private WebView web;
     private int fileRequest;
+    private MirrorReceiver mirror;
+
+    private void mirrorEvent(String event,Object value) {
+        String arg=value instanceof JSONObject ? value.toString() : JSONObject.quote(String.valueOf(value));
+        web.evaluateJavascript("window.PhoneMirror && PhoneMirror.event("+JSONObject.quote(event)+","+arg+")",null);
+    }
+    private void stopMirror() {
+        MirrorReceiver old=mirror;mirror=null;
+        getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if(old!=null){old.close();mirrorEvent("off","已停止接收");}
+    }
+    @Override protected void onStop(){stopMirror();super.onStop();}
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -76,6 +88,21 @@ public final class MainActivity extends Activity {
     }
 
     public final class DeviceActions {
+        @JavascriptInterface public void phoneMirror(boolean start) {
+            runOnUiThread(()->{
+                if(!start){stopMirror();return;}
+                if(mirror!=null)return;
+                try {
+                    mirror=new MirrorReceiver(MainActivity.this,(source,event,value)->runOnUiThread(()->{
+                        if(source!=mirror)return;
+                        if("error".equals(event))stopMirror();
+                        mirrorEvent(event,value);
+                    }));
+                    mirror.start();
+                    getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }catch(Exception | LinkageError e){stopMirror();mirrorEvent("error","无法启动接收："+e.getMessage());}
+            });
+        }
         @JavascriptInterface public void chromeColor(String color) {
             if(color!=null && color.matches("#[a-fA-F0-9]{6}"))runOnUiThread(()->{
                 int value=Color.parseColor(color);getWindow().setStatusBarColor(value);getWindow().setNavigationBarColor(value);

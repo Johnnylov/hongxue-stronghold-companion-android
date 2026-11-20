@@ -28,6 +28,8 @@
     <script src="next-step.js" defer></script>
     <script src="stage-menu.js" defer></script>
     <script src="app.js" defer></script>
+    <link rel="stylesheet" href="phone-mirror.css" />
+    <script src="phone-mirror.js" defer></script>
     <script src="point-controls.js" defer></script>
   </head>
   <body>
@@ -45,6 +47,7 @@
         >
         <button data-act="prefs">设置</button>
       </nav>
+      <button id="phone-connect" type="button" hidden>连接 iPhone</button>
       <button class="about" data-act="about" aria-label="版本与来源">ⓘ</button>
     </header>
     <main>
@@ -58,5 +61,6 @@
       <div id="dialogBody"></div>
     </dialog>
     <div id="toast" role="status"></div>
+    <section id="phone-panel" aria-label="iPhone 对局助手" hidden></section>
   </body>
 </html>

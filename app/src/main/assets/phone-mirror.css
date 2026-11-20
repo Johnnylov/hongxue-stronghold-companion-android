@@ -1,0 +1,7 @@
+#phone-panel{position:fixed;bottom:12px;right:12px;z-index:12;width:min(25rem,calc(100vw - 24px));max-height:60vh;overflow:auto;background:var(--card,#fff);color:var(--ink,#222);border:1px solid var(--line,#aaa);border-radius:12px;padding:12px;box-shadow:0 3px 18px #0003}
+#phone-panel[hidden],#phone-connect[hidden]{display:none}
+#phone-panel.folded{width:auto;padding:4px}
+#phone-panel p{margin:8px 0}
+#phone-panel .mirror-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+#phone-panel .mirror-shop{display:flex;flex-wrap:wrap;gap:5px}
+#phone-connect{white-space:nowrap;font-weight:bold;cursor:pointer}

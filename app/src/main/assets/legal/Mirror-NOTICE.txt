@@ -1,0 +1,11 @@
+Matou local iPhone mirroring, introduced in v1.1.0
+
+The combined mirroring-enabled executable is distributed under GNU GPL version 3. Original Apache-2.0 source files and independently licensed components retain their notices. Game artwork remains the property of the respective rights holders.
+
+AirPlay JNI and native libraries: jqssun/android-airplay-server v0.0.36 (a46cca0a6a1274e9e33c0e750f0f1c1eb1d881ea), GPL-3.0. https://github.com/jqssun/android-airplay-server/tree/v0.0.36
+Rebuild the receiver with that checkout including its pinned submodules and the Android build instructions supplied there. The corresponding receiver source archive, including the pinned UxPlay, FFmpeg, libplist and openssl-cmake submodules, accompanies the v1.1.0 release. UxPlay, FFmpeg, libplist, OpenSSL, Oboe and Android libc++ retain their respective licenses and notices. Java JNI signatures are adapted for the new foreground receiver and local video processing.
+
+Bundled ONNX Runtime Android 1.21.0, Microsoft Corporation, MIT. PaddleOCR model and character dictionary from the desktop project's data/model/ocr at revision 15c074d. Shop economy geometry and Roman numeral stroke handling are adapted from the desktop project's Apache-2.0 ShopEconomyReader and TerminalLevelReader, retaining original attributions in NOTICE.
+
+JmDNS 3.6.1, Apache-2.0, https://github.com/jmdns/jmdns ; SLF4J 2.0.16, MIT, https://www.slf4j.org .
+Application source, build scripts and release downloads: https://github.com/Johnnylov/hongxue-stronghold-companion-android/releases/tag/v1.1.0

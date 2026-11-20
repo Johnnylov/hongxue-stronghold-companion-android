@@ -455,7 +455,7 @@ function confirmDialog(title, message, action, label) {
   );
 }
 function about() {
-  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.0.9 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
+  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.1.0 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
     ${section("本地保存")}<p>阵容与购买进度保存在这台设备。卸载应用或清除应用数据会移除记录。</p>
     <div class="actions">${button("legal", "许可与归属", "btn light")}</div>`);
 }
@@ -659,6 +659,13 @@ document.addEventListener("click", async (ev) => {
         "DOTNET-LICENSE.txt",
         "DOTNET-NOTICES.txt",
         "ASPNET-NOTICES.txt",
+        "Mirror-NOTICE.txt",
+        "AirPlay-GPL-3.0.txt",
+        "ONNXRuntime-MIT.txt",
+        "ONNXRuntime-ThirdParty.txt",
+        "SLF4J-LICENSE.txt",
+        "libplist-LGPL.txt",
+        "FFmpeg-LGPL.txt",
       ].map((name) => fetch("legal/" + name).then((r) => r.text())),
     );
     if (dialog.open)
