@@ -63,3 +63,6 @@
 .next-heading {justify-content:flex-end}
 .route-face.final {border-color:#528357}
 .route-face.transition {border-color:#b46b33}
+.next-heading [data-w="map-next-round"] {min-height:44px}
+.next-step .round-budget,.next-step .round-action,.next-step .round-guide {margin:6px 0}
+.next-step .round-action {padding:8px 10px;background:var(--tint);border-radius:6px}

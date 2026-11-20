@@ -547,6 +547,17 @@ const Workbench = (() => {
         <p>后半程 · ${esc(type.secondHalfVariants.map(e => e.enemyName).join("、"))}</p></article>`;
     }).join("");
   }
+  function setRound(value) {
+    if (!Number.isInteger(value) || value<1 || value>GuideModel.maxRound || value===db.run.round) return;
+    db.run.round=value;
+    Economy.changed(db.run,"round");
+    if (db.prefs.autoStage) Teams.roundChanged();
+    persist();
+    render();
+  }
+  function advanceButton(cls="linkbtn") {
+    return db.run.round<GuideModel.maxRound ? act("map-next-round","下一回合",cls,db.run.round+1) : "";
+  }
   function runPanel() {
     const r = db.run,
       boss = data.bosses.bosses.find((b) => b.name === r.boss),
@@ -602,6 +613,7 @@ const Workbench = (() => {
     const f = filterState(),
       p = db.prefs,
       r = db.run;
+    if (a==="map-next-round") {setRound(Number(v));return;}
     if (a==="next-retry") return NextStep.retry();
     if (a.startsWith("income-")) { ItemIncome.click(a,v); return; }
     if (a === "selection-facet") {
@@ -857,11 +869,11 @@ const Workbench = (() => {
     if (e.id.startsWith("run-")) {
       const numeric=["round","terminal","upgrade","money","levelSince"].includes(k);
       const value=numeric ? (e.value==="" ? null : Number(e.value)) : e.value;
+      if (k==="round") {setRound(value);return;}
       if (k==="money") ItemIncome.confirmBalance(db.run,value);
       else db.run[k]=value;
       Economy.changed(db.run, k);
       if (k === "mode") Maps.bansChanged();
-      if (k === "round" && db.prefs.autoStage) Teams.roundChanged();
       persist();
       render();
     }
@@ -870,6 +882,7 @@ const Workbench = (() => {
     initialize,
     renderPage,
     runPanel,
+    advanceButton,
     data,
     profiles,
     rawOps,

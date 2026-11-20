@@ -32,9 +32,9 @@ const Planning = (() => {
       req.preferred = PlanMatch.weights(held);
       req.custom = [...new Set([...req.custom,...req.owned.filter(n=>W.rawOps[n].isCustom)])];
       req.modeId = db.run.mode;
-      const income = Economy.funding(db.run.mode,req.round,W.data.economy);
-      req.estimated = req.money == null && !!income;
-      if (req.estimated) req.money = Economy.balance(income.amount + ItemIncome.total(db.run));
+      const {money,estimated}=Economy.budget(db.run,W.data.economy);
+      req.money=money;
+      req.estimated=estimated;
     } else if (req.onlyRun === false) {
       req.banned = [];
       req.bannedBonds = [];
@@ -116,14 +116,18 @@ const Planning = (() => {
       <div class="route-roles">${roles.map(tag).join("")}</div>
       <div class="route-faces">${cards}</div></section>`;
   }
-  function routePanel(route, advice, terminal, final=false, trial=false) {
+  function routeEntry(route, advice, terminal, final=false) {
     const all=(advice || []).flatMap((a,i)=>(a.levels || []).map(level=>({level,stage:route.stages[i]})));
     const current=all.find(x=>x.level.terminalLevel===(final?0:terminal));
-    const entry=current || all.find(x=>x.level.terminalLevel>terminal);
+    if(current) return {...current,preview:false};
+    const next=all.find(x=>x.level.terminalLevel>terminal);
+    return next && {...next,preview:true};
+  }
+  function routePanel(entry,trial=false) {
     if (!entry?.stage) return "";
-    const preview=!current;
+    const preview=entry.preview;
     const tryStage=trial ? W.act("map-trial-stage","将这套阶段阵容放到地图试摆","btn light",JSON.stringify(entry.stage.operators.map(o=>o.name))) : "";
-    return stageCard(entry.stage,preview?"下一本":"当前")+tryStage+levelCard(entry.level,preview?"升至 "+entry.level.terminalLevel+" 本后 · ":"");
+    return stageCard(entry.stage,entry.stage.isFinal?"成型目标":preview?"下一本":"当前")+tryStage+levelCard(entry.level,preview?"升至 "+entry.level.terminalLevel+" 本后 · ":"");
   }
   function levelCard(level,prefix="") {
     const picks=level.reserve || [];
@@ -275,7 +279,7 @@ const Planning = (() => {
     const level=stageAdvice.flatMap(a=>a.levels || []).find(l=>l.terminalLevel===req.terminal);
     return (
       (selectedPlan ? PlanMatch.summary(selectedPlan,req,level,selectedPlan===ranked[0]) : "") +
-      (auto && display?.autoPlan ? routePanel(display.autoPlan.savedRoute,stageAdvice,req.terminal) : "") +
+      (auto && display?.autoPlan ? routePanel(routeEntry(display.autoPlan.savedRoute,stageAdvice,req.terminal)) : "") +
       section(auto ? "候选主盟约" : "候选阵容", `<small class="hint">本局终端 ${esc(db.run.terminal)} 本</small>`) +
       (value.limited || value.searchLimited
         ? `<p class="hint">已到搜索上限，以下为当前找到的候选。</p>`
@@ -567,5 +571,5 @@ const Planning = (() => {
     persist();
     render();
   });
-  return { render, click, chooseGoals, recruitment, tabs, levelCard, stageCard, routePanel, matchRoute, payload };
+  return { render, click, chooseGoals, recruitment, tabs, levelCard, stageCard, routeEntry, routePanel, matchRoute, payload };
 })();

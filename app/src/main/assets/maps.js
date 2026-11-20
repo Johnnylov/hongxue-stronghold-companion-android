@@ -595,7 +595,7 @@ const Maps = (() => {
     desk.innerHTML = `<div class="deploy-layout">${tabs}
       ${workshopStage() ? "" : `<section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
       <span>第 ${db.run.round} 回合 · 终端 ${db.run.terminal} 级${db.run.money == null ? "" : " · 资金 " + esc(db.run.money)}</span>
-      ${db.run.round < GuideModel.maxRound ? W.act("map-next-round","下一回合","linkbtn") : ""}</div>
+      ${W.advanceButton()}</div>
       <div id="map-run-panel" ${db.prefs.mapRunOpen ? "" : "hidden"}>${db.prefs.mapRunOpen ? W.runPanel() : ""}</div></section>
       <div id="map-next-step">${NextStep.view()}</div>`}
       <div class="map-head map-preview-head"><button class="map-photo" type="button" data-w="map-zoom" aria-label="放大${esc(map.name)}"><img alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp"></button><div><strong>${esc(map.name)}</strong><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small><div class="actions">${W.act("map-gallery","看图选地图","btn light")}${W.act("map-zoom","放大","linkbtn")}</div></div><label class="map-picker">切换地图${W.select(
@@ -642,13 +642,6 @@ const Maps = (() => {
     if (a === "map-run-toggle") {
       db.prefs.mapRunOpen = !db.prefs.mapRunOpen;
       persist(); render();
-      return;
-    }
-    if (a === "map-next-round") {
-      db.run.round = Math.min(GuideModel.maxRound, db.run.round+1);
-      Economy.changed(db.run, "round");
-      if (db.prefs.autoStage) Teams.roundChanged();
-      persist(); render(); renderBasket();
       return;
     }
     if (a === "map-cancel") {

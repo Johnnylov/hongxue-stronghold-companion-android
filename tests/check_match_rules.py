@@ -80,7 +80,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     panel.locator("#run-boss").select_option(index=1)
     panel.locator('[name="training-enemy"]').nth(0).check()
     panel.locator('[name="training-enemy"]').nth(1).check()
-    page.locator('[data-w="map-next-round"]').click()
+    page.locator('.map-run-bar [data-w="map-next-round"]').click()
     assert page.evaluate("[db.run.round,db.run.terminal,!!db.run.boss,db.run.enemyTypes.length]") == [15, 3, True, 2]
     expect(page.locator('[data-w="map-next-round"]')).to_have_count(0)
     balance.select_option("0")

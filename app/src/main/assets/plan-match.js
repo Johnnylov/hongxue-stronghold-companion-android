@@ -80,17 +80,19 @@ const PlanMatch = (() => {
     if (terminal<6 && (money==null || upgrade==null)) return ["先核对升本预算",unlock+budget];
     return [missing.length ? "本轮先留在 "+terminal+" 本，检查商店与站位" : "成型干员已齐，先检查站位",unlock+budget];
   }
+  function levelAction(level,req) {
+    const buy=(level.keyCards || []).find(n=>!W.isBanned(n) && Planning.recruitment(n,req.terminal).canRoll===true && (req.money==null || price(n)<=req.money));
+    if(req.money===0 && req.upgrade!==0) return "本轮先调站位";
+    if(req.terminal<6 && req.upgrade===0) return "可免费升至 "+(req.terminal+1)+" 本";
+    if(level.pace===0 && req.upgrade!=null && req.money!=null && req.money>=req.upgrade) return "若能守住，本轮可先升至 "+(req.terminal+1)+" 本";
+    if(buy) return "本轮遇到时先拿"+buy;
+    return level.title+" · 核对本级缺口";
+  }
   function summary(plan,req,level,first=true) {
     let [action,reason] = turn(plan,req);
     if (level) {
-      const budget=req.money==null?"余额待确认":(req.estimated?"估算余额 ":"当前余额 ")+req.money;
-      const buy=(level.keyCards || []).find(n=>!W.isBanned(n) && Planning.recruitment(n,req.terminal).canRoll===true && (req.money==null || price(n)<=req.money));
-      if(req.money===0 && req.upgrade!==0) action="本轮先调站位";
-      else if (req.terminal<6 && req.upgrade===0) action="可免费升至 "+(req.terminal+1)+" 本";
-      else if(level.pace===0 && req.upgrade!=null && req.money>=req.upgrade) action="若能守住，本轮可先升至 "+(req.terminal+1)+" 本";
-      else if(buy) action="本轮遇到时先拿"+buy;
-      else action=level.title+" · 核对本级缺口";
-      reason=budget+(req.upgrade!=null?" · 升本需 "+req.upgrade:"")+"。"+(buy?"优先购买名单见下方。":"");
+      action=levelAction(level,req);
+      reason=(req.money==null?"余额待确认":(req.estimated?"估算余额 ":"当前余额 ")+req.money)+(req.upgrade!=null?" · 升本需 "+req.upgrade:"")+"。";
     }
     const retained = plan.keep.map(u=>u.name+(u.elite?"（精锐）":"")).join("、");
     return `<section class="match-choice"><h3>${!first ? "所选路线" : plan.held.length ? "本局首选" : "通用参考"} · ${esc(plan.candidate.mainCovenant)}</h3>
@@ -98,5 +100,5 @@ const PlanMatch = (() => {
       ${req.estimated ? `<p class="hint">预算按本回合开局未消费 ${esc(req.money)} 资金估算，可在对局设置点选实际余额。</p>` : ""}
       <strong>${esc(action)}</strong><p>${esc(reason)}</p></section>`;
   }
-  return {holdings,weights,rank,summary};
+  return {holdings,weights,rank,summary,levelAction,price};
 })();

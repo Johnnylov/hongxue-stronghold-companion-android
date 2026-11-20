@@ -44,13 +44,17 @@ const Economy = (() => {
     return `<details class="round-funding"><summary>各回合资金参考</summary>${rows.length ? `<div>${rows.join("")}</div>` : ""}
       <small>${multiplayer ? "Stronghold-Protocol 多人规程模型。第 4 回合起为复刻估算，额外收益依实际画面。" : esc(data.roundFunding?.[mode]?.note || (mode === "mode_training_2" ? "入门协议按客户端教学配置发放。" : rows.length ? "金额取自原版游戏画面。" : "当前模式的基础发放表待核实。"))} 通常在休整期结束时清空剩余资金。</small>${comparison}</details>`;
   }
+  function budget(r,data) {
+    const income=funding(r.mode,r.round,data);
+    const extra=ItemIncome.total(r);
+    const opening=income ? balance(income.amount+extra) : null;
+    return {income,extra,opening,money:r.money ?? opening,estimated:r.money==null && opening!=null};
+  }
   function view(r, data, W) {
     const initial = data.prices[r.mode]?.[r.terminal - 1],
       computed = price(r, data),
       full = r.terminal >= 6;
-    const income = funding(r.mode, r.round, data);
-    const extra = ItemIncome.total(r);
-    const opening = income ? balance(income.amount + extra) : null;
+    const {income,extra,opening}=budget(r,data);
     const example = income ? `${income.label} · ${income.amount} 资金` : "本模式这一回合的发放额待核实，可直接点选手机上的余额。";
     const since = r.terminal === 1 ? 1 : r.levelSince;
     const costNote = full
@@ -86,5 +90,5 @@ const Economy = (() => {
       if (r.levelSince > r.round) r.levelSince = null;
     }
   }
-  return { price, view, changed, balance, funding };
+  return { price, view, changed, balance, funding, budget };
 })();
