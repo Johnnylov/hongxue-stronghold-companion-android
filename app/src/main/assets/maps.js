@@ -6,7 +6,9 @@ const Maps = (() => {
     job = 0,
     busy = false,
     runningKey = "",
+    runningAction = "",
     status = "";
+  const modeNames=["战斗","平衡","叠层"];
   const faces = ["→", "↓", "←", "↑"],
     types = {
       G: "地面",
@@ -73,8 +75,20 @@ const Maps = (() => {
   function current() {
     return W.data.garrison_maps.maps.find((x) => x.id === base().map);
   }
+  function deployable(name) {
+    return !!W.profiles[name]?.normalRange?.base && !W.isBanned(name);
+  }
+  function trackedPool() {
+    const t=active();
+    return t ? QuickRoster.fromStage(t.stages[stageNum(t)]).filter(p=>deployable(p.name)) : [];
+  }
+  function emptySource() {
+    if (workshopStage()) return null;
+    if (QuickRoster.owned().some(p=>deployable(p.name))) return "map-owned";
+    return trackedPool().length ? "map-team" : null;
+  }
   function candidates(pool = base().pool) {
-    return pool.filter(p => !W.isBanned(p.name)).flatMap((p) =>
+    return pool.filter(p => deployable(p.name)).flatMap((p) =>
       Array.from({ length: p.count }, (_, i) => ({
         name: p.name,
         isElite: i < p.elite,
@@ -104,6 +118,8 @@ const Maps = (() => {
         if (!keys.has(k)) delete sh.placed[k];
       sh.pins = sh.pins.filter((k) => keys.has(k));
       sh.total = null;
+      delete sh.feedback;
+      delete sh.pendingMode;
       sh.checks = [];
       sh.active = [];
     }
@@ -162,6 +178,11 @@ const Maps = (() => {
       base();
       persist();
     }
+  }
+  function resumeMode() {
+    if (db.page!=="map" || (base().tab || "board")!=="board") return;
+    const m=base(), sh=sheet();
+    if(sh.pendingMode===m.mode && candidates().length) void calculate("placement");
   }
   function savedField(req) {
     const last = db.board?.layouts?.[req.map]?.recommended;
@@ -275,6 +296,7 @@ const Maps = (() => {
     sync(false);
   }
   function invalidate() {
+    delete sheet().feedback;
     sheet().total = null;
     sheet().checks = [];
     sheet().active = [];
@@ -288,6 +310,7 @@ const Maps = (() => {
     ++job;
     busy = false;
     runningKey = "";
+    runningAction = "";
     W.stopMap();
     if (repaint && db.page === "map") render();
   }
@@ -296,6 +319,15 @@ const Maps = (() => {
       const { cell, facing } = placed[k];
       return [k, { cell, facing }];
     }));
+  }
+  function describePlacement(before, after, mode) {
+    const keys=Object.keys(after);
+    const same=keys.length===Object.keys(before).length && keys.every(key=>{
+      const a=before[key], b=after[key];
+      return a && a.cell.col===b.cell.col && a.cell.row===b.cell.row && a.facing===b.facing;
+    });
+    const summary=modeNames[mode]+"推荐已完成 · 上场 "+keys.length+" 人";
+    return same ? summary+"，人选、位置和朝向与上次摆位相同。" : summary+"，棋盘已更新。";
   }
   async function calculate(action) {
     const m = base(),
@@ -313,6 +345,8 @@ const Maps = (() => {
     if (action === "placement" && sh.recommended?.key === key) {
       const { placed, total, active, checks } = sh.recommended;
       m.needsSolve = false;
+      sh.feedback=describePlacement(sh.placed,placed,m.mode);
+      delete sh.pendingMode;
       Object.assign(sh, { placed: clone(placed), total, active, checks, manual: false });
       persist();
       render();
@@ -321,16 +355,18 @@ const Maps = (() => {
     const ticket = ++job;
     busy = true;
     runningKey = key;
+    runningAction = action;
     status = action === "placement" ? "准备计算…" : "正在评估…";
     render();
     try {
       const result = await W.engine(action, req, (step, total) => {
         if (ticket !== job) return;
         status = `搜索站位 ${step}/${total}`;
-        const label = desk.querySelector('[data-w="map-solve"]');
-        if (label) label.textContent = status;
+        const label = desk.querySelector("#map-mode-status");
+        if (label) label.textContent = modeNames[m.mode]+" · "+status;
       });
       if (ticket !== job) return;
+      const previous=sh.placed;
       sh.placed = Object.fromEntries(
         result.placed.map((p) => [
           p.key,
@@ -343,18 +379,28 @@ const Maps = (() => {
         sh.recommended = { key, placed: clone(sh.placed), total: result.total,
           active: result.activeCovenants, checks: result.checks };
         sh.manual = false;
+        sh.feedback=describePlacement(previous,sh.placed,m.mode);
       } else {
         sh.manual = true;
+        sh.feedback=modeNames[m.mode]+" · 已评估当前手动站位。";
       }
+      delete sh.pendingMode;
       sh.active = result.activeCovenants;
       sh.checks = result.checks;
       persist();
     } catch (e) {
-      if (ticket === job) toast("无法计算站位：" + e.message);
+      if (ticket === job) {
+        delete sh.pendingMode;
+        sh.feedback="站位计算失败："+e.message+"。点推荐站位可重试。";
+        m.needsSolve=true;
+        W.stopMap();
+        persist();
+      }
     } finally {
       if (ticket === job) {
         busy = false;
         runningKey = "";
+        runningAction = "";
         if (db.page === "map") render();
         if (db.prefs.basketTab === "recommend") renderBasket();
       }
@@ -539,6 +585,13 @@ const Maps = (() => {
             .join("")}</div>`
         : ""
     }</div>`;
+    const fallbackSource=pool.length?null:emptySource();
+    const emptyHint=fallbackSource==="map-team"?"将用「"+active().title+"」当前阶段试摆。":fallbackSource==="map-owned"?"可使用本局实际持有的干员。":"先选本局干员，再推荐站位。";
+    const runningPlan=busy && runningAction==="placement";
+    const solveTitle=runningPlan?"正在推荐…":pool.length?"推荐站位":fallbackSource==="map-team"?"用当前清单阵容试摆":fallbackSource==="map-owned"?"用本局持有推荐站位":"选干员并推荐站位";
+    const feedback=busy?modeNames[m.mode]+" · "+status:!pool.length?
+      modeNames[m.mode]+"模式 · 当前棋盘无可部署干员。"+emptyHint:
+      sh.feedback || (m.needsSolve?"干员或站位已调整，可重新推荐。":modeNames[m.mode]+"模式 · 可按当前阵容推荐站位。");
     desk.innerHTML = `<div class="deploy-layout">${tabs}
       ${workshopStage() ? "" : `<section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
       <span>第 ${db.run.round} 回合 · 终端 ${db.run.terminal} 级${db.run.money == null ? "" : " · 资金 " + esc(db.run.money)}</span>
@@ -550,7 +603,9 @@ const Maps = (() => {
       W.data.garrison_maps.maps.map((z) => [z.id, z.name]),
       m.map,
     )}</label></div>
-      <div class="deploy-modes"><div class="tracking-tabs">${["战斗", "平衡", "叠层"].map((n, i) => W.act("map-mode-set", n, m.mode === i ? "chosen" : "", "" + i)).join("")}</div><div class="tracking-tabs">${[8, 9].map((i) => W.act("map-count-set", i, m.people === i ? "chosen" : "", "" + i)).join("")}</div></div>
+      <div class="deploy-modes"><div class="tracking-tabs" role="group" aria-label="站位模式">${modeNames.map((n,i)=>`<button type="button" data-w="map-mode-set" data-v="${i}" aria-pressed="${m.mode===i}" class="${m.mode===i?"chosen":""}">${n}</button>`).join("")}</div><div class="tracking-tabs">${[8, 9].map((i) => W.act("map-count-set", i, m.people === i ? "chosen" : "", "" + i)).join("")}</div></div>
+      <div class="map-solve-row"><button type="button" class="btn gold" data-w="map-solve" ${runningPlan?"disabled":""}>${solveTitle}</button>${busy?W.act("map-cancel","取消计算","linkbtn"):""}
+        <span id="map-mode-status" role="status">${esc(feedback)}</span></div>
       <div class="bench-head roster-bar"><strong>${workshopStage() ? "本阶段上场" : m.source === "owned" ? "本局持有" : "阵容试摆"} · ${m.pool.length} 名</strong><span>共 ${pool.length} 份 · 精锐 ${pool.filter(p=>p.isElite).length} 份</span>${workshopStage() ? "" : W.act("map-pool","快调干员","btn light")}</div>
       <article class="board-panel"><div class="board-shell"><div class="board-cols">${axisCols}</div><div class="board-rows">${axisRows}</div><div class="board">${grid}${m.routes ? routeLayer(map, min, m.filter || "both") : ""}</div></div>
       <div class="plan-checks" aria-label="站位校验" aria-live="polite">${flags || `<span class="hint">${busy ? "正在计算站位校验…" : m.needsSolve ? "持有数量已更新，可继续调整或重新推荐站位。" : count ? "正在评估当前摆位…" : "选择干员并推荐站位后，显示盟约、上下路阻挡与治疗。"}</span>`}</div></article>
@@ -559,7 +614,7 @@ const Maps = (() => {
       ${field.length ? `<div class="deploy-roster">${field.map(card).join("")}</div>` : ""}
       <div class="bench-head"><strong>整备区 · ${bench.length} 人</strong><span>上场 ${count} · 已获取 ${new Set(pool.map((p) => p.name)).size} 名</span>${workshopStage() ? "" : W.act("map-pool", "干员池 ›", "linkbtn")}</div>
       ${bench.length ? `<div class="deploy-roster">${bench.map(card).join("")}</div>` : ""}
-      <div class="deploy-tools actions">${W.act("map-solve", busy ? status : m.needsSolve && count ? "更新推荐站位" : "推荐站位", "btn gold")}${busy ? W.act("map-cancel", "取消计算", "linkbtn") : ""}${workshopStage() ? "" : W.act("map-team", "使用当前阵容")+W.act("map-owned", "使用实际拥有池")+W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
+      <div class="deploy-tools actions">${workshopStage() ? "" : W.act("map-team", "使用当前阵容")+W.act("map-owned", "使用实际拥有池")+W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
       ${legend}${sh.manual && sh.recommended && sh.total !== null ? `<div class="actions"><p class="hint">手动摆位 · 较推荐 ${Math.round((sh.total - sh.recommended.total) * 10) / 10}</p>${W.act("map-restore", "恢复推荐站位", "linkbtn")}</div>` : ""}</div>`;
     const cols = bounds.right - bounds.left + 1;
     desk
@@ -597,6 +652,9 @@ const Maps = (() => {
       return;
     }
     if (a === "map-cancel") {
+      delete sheet().pendingMode;
+      sheet().feedback="已取消计算，可重新推荐。";
+      persist();
       cancelCalculation();
       return;
     }
@@ -619,9 +677,15 @@ const Maps = (() => {
       }
       if (a === "map-mode-set") m.mode = Number(v);
       else m.people = Number(v);
+      const canSolve=candidates().length>0;
+      if (canSolve) sheet().pendingMode=m.mode;
       persist();
-      render();
-      if (candidates().length) await calculate("placement");
+      if (canSolve) await calculate("placement");
+      else {
+        const fallback=a==="map-mode-set" && emptySource();
+        if (fallback) await click(fallback);
+        else render();
+      }
       return;
     }
     if (a === "map-route-filter") {
@@ -630,15 +694,26 @@ const Maps = (() => {
       render();
       return;
     }
-    const m = base(),
-      sh = sheet(),
-      eligible = Object.keys(W.profiles).filter(
-        (n) => W.profiles[n]?.normalRange?.base,
-      );
+    const m = base(), sh = sheet();
+    if (a==="map-trial-stage") {
+      const units=JSON.parse(v).filter(deployable);
+      if (!units.length) {toast("本阶段没有可部署干员");return;}
+      m.source="trial";
+      m.pool=QuickRoster.fromStage({entries:units.map(n=>({key:"op:"+n}))});
+      inspecting=false;
+      sync();
+      desk.querySelector(".deploy-modes")?.scrollIntoView({block:"start"});
+      return;
+    }
+    const choosingForSolve=a==="map-solve" && !candidates().length;
+    if (choosingForSolve) {
+      if(workshopStage()) {move("planner");return;}
+      a=emptySource() || "map-pool";
+    }
     if (a === "map-pool" || a === "map-counts") {
       cancelCalculation(false);
       QuickRoster.open({title:m.source === "owned" ? "快调本局干员" : "快调试摆干员",
-        pool:m.pool, names:(m.source === "owned" ? Object.keys(W.rawOps) : eligible).filter(n=>!W.isBanned(n)), only:a === "map-counts",
+        pool:m.pool, names:(m.source === "owned" && !choosingForSolve ? Object.keys(W.rawOps) : Object.keys(W.profiles).filter(deployable)).filter(n=>!W.isBanned(n)), only:a === "map-counts",
         apply(pool) { m.pool = pool; inspecting = false; sync(); }
       });
       return;
@@ -646,8 +721,7 @@ const Maps = (() => {
     if (a === "map-team" || a === "map-owned") {
       const team = active();
       if (a === "map-team" && !team) { toast("先打开或新建一套阵容"); return; }
-      const pool = a === "map-owned" ? QuickRoster.owned() :
-        QuickRoster.fromStage(team.stages[stageNum(team)]).filter(p=>eligible.includes(p.name));
+      const pool = a === "map-owned" ? QuickRoster.owned() : trackedPool();
       if (a === "map-team" && !pool.length) { toast("当前阶段没有可部署干员"); return; }
       m.source = a === "map-owned" ? "owned" : "trial";
       m.pool = pool;
@@ -656,7 +730,7 @@ const Maps = (() => {
       return;
     }
     if (a === "map-solve" || a === "map-evaluate") {
-      if (!busy) await calculate(a === "map-solve" ? "placement" : "evaluate");
+      await calculate(a === "map-solve" ? "placement" : "evaluate");
       return;
     }
     if (a === "map-finish-edit") {
@@ -773,5 +847,5 @@ const Maps = (() => {
     selected = k;
     moveTo(k, ...tile.dataset.v.split(",").map(Number));
   });
-  return { render, click, openWorkshop, leaveWorkshop, candidates, ownedChanged, showInitial, savedField, waitingForRoster, restoreRosterSource, bansChanged };
+  return { render, click, resumeMode, openWorkshop, leaveWorkshop, candidates, ownedChanged, showInitial, savedField, waitingForRoster, restoreRosterSource, bansChanged };
 })();

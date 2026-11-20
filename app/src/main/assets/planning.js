@@ -116,13 +116,14 @@ const Planning = (() => {
       <div class="route-roles">${roles.map(tag).join("")}</div>
       <div class="route-faces">${cards}</div></section>`;
   }
-  function routePanel(route, advice, terminal, final=false) {
+  function routePanel(route, advice, terminal, final=false, trial=false) {
     const all=(advice || []).flatMap((a,i)=>(a.levels || []).map(level=>({level,stage:route.stages[i]})));
     const current=all.find(x=>x.level.terminalLevel===(final?0:terminal));
     const entry=current || all.find(x=>x.level.terminalLevel>terminal);
     if (!entry?.stage) return "";
     const preview=!current;
-    return stageCard(entry.stage,preview?"下一本":"当前")+levelCard(entry.level,preview?"升至 "+entry.level.terminalLevel+" 本后 · ":"");
+    const tryStage=trial ? W.act("map-trial-stage","将这套阶段阵容放到地图试摆","btn light",JSON.stringify(entry.stage.operators.map(o=>o.name))) : "";
+    return stageCard(entry.stage,preview?"下一本":"当前")+tryStage+levelCard(entry.level,preview?"升至 "+entry.level.terminalLevel+" 本后 · ":"");
   }
   function levelCard(level,prefix="") {
     const picks=level.reserve || [];

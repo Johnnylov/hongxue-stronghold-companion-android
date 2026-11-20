@@ -116,7 +116,7 @@ const NextStep = (() => {
       const early=route.stages[0].operators.filter(o=>Planning.recruitment(o.name).canRoll===true && !db.run.counts[o.name]);
       opening=`<p class="route-opening"><b>当前 1 本</b>　${early.length?"遇到"+esc(early.map(o=>o.name).join("、"))+"可先拿。":"先用现有一阶干员过渡。"}${esc(budget)}。</p>`;
     }
-    return `<p class="route-source">${esc(title)}</p>`+opening+Planning.routePanel(route,advice,db.run.terminal,final);
+    return `<p class="route-source">${esc(title)}</p>`+opening+Planning.routePanel(route,advice,db.run.terminal,final,true);
   }
   function cachedAdvice(owner,key,load,onError) {
     if(adviceJob && adviceJob.owner===owner && adviceJob.key===key) return adviceJob.html;
