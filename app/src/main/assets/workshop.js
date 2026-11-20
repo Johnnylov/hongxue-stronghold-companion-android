@@ -77,7 +77,7 @@ const Workshop = (() => {
     const previousScroll=desk.querySelector(".ws-library-grid")?.scrollTop || 0;
     desk.innerHTML=Planning.tabs("workshop")+ `<div class="ws-layout">${library()}<section class="ws-stage">
       <div class="ws-team">${W.select("ws-team",t.id?db.teams.map(g=>[g.id,g.title]):[["",t.title]],t.id || "")}${act("new","新阵容","")}${W.act("team-import","导入","linkbtn")}${t.id?W.act("team-share","分享","linkbtn"):""}</div>
-      ${stageDropdown(t.stages,index,"ws-stage")}
+      ${StageMenu.html(t.stages,index,"ws-stage")}
       <div class="ws-toolbar">${act("position","查看站位","")}<span>第 ${db.run.round} / ${GuideModel.maxRound} 回合 · ${db.run.terminal} 本</span></div>
       <p class="unit-key">＋1 加一份　精 标记精锐　✓ 上场 / 下场　× 删这一份</p>
       ${section("上场 · "+field+" / "+cap(),act("dest",addBench?"加到上场":"✓ 加到上场","field","linkbtn"))}

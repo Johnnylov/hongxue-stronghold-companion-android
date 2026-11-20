@@ -11,7 +11,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 root = Path(__file__).resolve().parents[1]
-apk = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/Matou-Tablet-v1.0.6.apk"
+apk = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/Matou-Tablet-v1.0.7.apk"
 cases = json.loads((root / "tests/DesktopParity/reference.json").read_text(encoding="utf-8"))
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *args):
