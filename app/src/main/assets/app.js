@@ -133,6 +133,7 @@ function stageTabs(stages, index, action) {
   return `<div class="tabrow" aria-label="选择阶段">${stages.map((s, i) => button(action, GuideModel.stageText(s), i === index ? "chosen" : "", attr("index", i))).join("")}</div>`;
 }
 function move(page, detail = null) {
+  if (db.page==="map" && db.workshopMap) Maps.leaveWorkshop();
   db.page = page;
   db.detail = detail;
   query = "";
@@ -142,6 +143,7 @@ function move(page, detail = null) {
   window.scrollTo(0, 0);
 }
 function render() {
+  document.body.classList.toggle("workshop-open",db.page==="planner" && db.planning?.kind==="workshop");
   document
     .querySelectorAll("nav button")
     .forEach((b) =>
@@ -304,7 +306,7 @@ function renderBasket() {
   };
   basket.innerHTML = tabs + RunLineups.preview() + `<div class="basket-head"><div class="buytitle">${idButton("open-team", t.title, t.id, "linkbtn")}</div><span class="count">${done} / ${rows.length}</span></div>
     <label><span class="hint">当前阶段</span><select class="compact-select" id="basketStage" aria-label="购买清单阶段">${t.stages.map((st, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${esc(GuideModel.stageText(st))}</option>`).join("")}</select></label>
-    <p class="hint">${s.rangeSource === "默认参考" ? "默认按 16 回合划分，可在「阶段与回合」调整。" : s.start ? "本阶段按指定回合范围执行。" : s.isFinal ? "成型目标按实际进度切换。" : "此阶段可手动切换。"}</p>
+    <p class="hint">${s.rangeSource === "默认参考" ? "默认按 15 回合划分，可在「阶段与回合」调整。" : s.start ? "本阶段按指定回合范围执行。" : s.isFinal ? "成型目标按实际进度切换。" : "此阶段可手动切换。"}</p>
     <progress class="progress" value="${done}" max="${rows.length || 1}" aria-label="购买进度"></progress>
     ${rows.length ? group("op", "干员") + group("eq", "装备") : empty("当前阶段的清单是空的", "进入阵容，为这个阶段添加干员或装备。") + idButton("open-team", "去配阵容", t.id, "linkbtn")}
     ${Teams.reminderText(t)}${Teams.tracked().some((group) => group.owned.length) ? button("reset", "重开一局，清除勾选", "linkbtn") : ""}`;
@@ -326,6 +328,7 @@ function incorporate(g, stage = previewStage, owned = [], destination = "teams")
     stage: Math.min(stage, g.stages.length - 1),
     owned,
   };
+  GuideModel.limitRanges(t);
   db.teams.unshift(t);
   db.active = t.id;
   close();
@@ -454,7 +457,7 @@ function confirmDialog(title, message, action, label) {
   );
 }
 function about() {
-  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.0.4 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
+  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.0.5 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
     ${section("本地保存")}<p>阵容与购买进度保存在这台设备。卸载应用或清除应用数据会移除记录。</p>
     <div class="actions">${button("legal", "许可与归属", "btn light")}</div>`);
 }
@@ -708,6 +711,7 @@ document.addEventListener("change", (ev) => {
     persist();
     renderBasket();
     if (db.page === "map") Maps.render();
+    if (db.page === "planner") Planning.render();
   }
 });
 dialog.addEventListener("close", () => {
@@ -722,6 +726,7 @@ window.handleBack = () => {
     close();
     return true;
   }
+  if (db?.page==="map" && db.workshopMap) { move("planner"); return true; }
   if (db?.detail) {
     move(db.page);
     return true;
@@ -733,6 +738,8 @@ window.handleBack = () => {
   return false;
 };
 async function start() {
+  const navigation=document.querySelectorAll("header button");
+  for (const button of navigation) button.disabled=true;
   try {
     const response = await fetch("catalogue.json");
     if (!response.ok) throw Error("资料加载失败");
@@ -759,20 +766,11 @@ async function start() {
       db.stageRangesMigrated = true;
       persist();
     }
-    if (!db.round16Migrated) {
-      for (const t of db.teams)
-        for (const s of t.stages) {
-          if (s.start > GuideModel.maxRound) {
-            s.start = s.end = null;
-          } else if (s.end > GuideModel.maxRound) s.end = GuideModel.maxRound;
-          else if (
-            s.end === 15 &&
-            s.isFinal &&
-            (s.rangeSource === "默认参考" || t.conditions)
-          )
-            s.end = GuideModel.maxRound;
-        }
-      db.round16Migrated = true;
+    if (!db.round15Migrated) {
+      for (const t of [...db.teams,...db.imports]) GuideModel.limitRanges(t);
+      if (db.run?.round > GuideModel.maxRound) db.run.round=GuideModel.maxRound;
+      if (db.run?.levelSince > GuideModel.maxRound) db.run.levelSince=GuideModel.maxRound;
+      db.round15Migrated=true;
       persist();
     }
     await Workbench.initialize();
@@ -784,6 +782,7 @@ async function start() {
     }
     Maps.restoreRosterSource();
     render();
+    for (const button of navigation) button.disabled=false;
   } catch (e) {
     desk.innerHTML = `<h2>手册暂时无法打开</h2><p>${esc(e.message)}</p>`;
   }

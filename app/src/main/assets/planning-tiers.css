@@ -19,3 +19,21 @@
 .recruit-info strong { font-size: 13px; }
 .recruit-level { color: var(--ink); font-size: 12px; }
 .recruit-member .recruit-info small { color: var(--muted); font-size: 11px; }
+.match-choice { padding:12px; margin:10px 0; border:1px solid var(--edge); border-left:4px solid var(--accent); border-radius:8px; background:var(--paper); }
+.match-choice h3, .match-choice p { margin:3px 0 7px; }
+.match-inputs { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:8px 0; }
+.match-inputs [aria-pressed="true"] { background:var(--accent); color:var(--on-accent); }
+.income-row,.income-values { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:6px 0; }
+.income-row { padding:6px 0; border-bottom:1px solid var(--edge); }
+.income-row b { min-width:7em; }
+.income-row small { color:var(--muted); }
+.level-advice {background:var(--paper);color:var(--ink);border:1px solid var(--edge);border-left:4px solid var(--accent);border-radius:8px;padding:12px 16px;margin:8px 0}
+.level-advice h4 {margin:0;font-size:18px}
+.level-advice dl,.level-advice dd {margin:0}
+.level-advice dt {color:var(--muted);font-size:13px;margin:9px 0 2px}
+.level-advice dd {line-height:1.5}
+.advice-purchases {white-space:pre-line}
+.advice-reserve {display:flex;flex-wrap:wrap;gap:6px}
+.advice-reserve button {display:flex;align-items:center;gap:6px;border:1px solid var(--edge);color:var(--ink);border-radius:5px;background:var(--panel);padding:4px 8px;text-align:left}
+.advice-reserve .portrait {width:42px;height:42px}
+.advice-reserve small {display:block;color:var(--muted)}

@@ -149,6 +149,7 @@ public sealed class LineupPlanner
         private List<PlannedLineup> _found = [];
         private readonly List<int> _picked = [];
         private readonly bool[] _used;
+        private readonly int[] _preference;
         private readonly HashSet<string> _visited = new(StringComparer.Ordinal);
         private static readonly IReadOnlyDictionary<int, string> NoTransforms = new Dictionary<int, string>();
 
@@ -163,6 +164,7 @@ public sealed class LineupPlanner
             _native = ops.Select(o => o.CoreCovenants.Concat(o.AdditionalCovenants).ToHashSet(StringComparer.Ordinal)).ToArray();
             _harmony = _native.Select(c => c.Contains(CovenantCalculator.HarmonyCovenant)).ToArray();
             _used = new bool[ops.Count];
+            _preference = ops.Select(o => request.Preferred.GetValueOrDefault(o.Name)).ToArray();
             _rarity = request.Goals.ToDictionary(g => g.Name, g => _native.Count(n => n.Contains(g.Name)));
             _goalNames = request.Goals.Select(g => g.Name).ToHashSet(StringComparer.Ordinal);
             _additionalNames = _covenantNames.Where(n => !_goalNames.Contains(n)
@@ -321,7 +323,7 @@ public sealed class LineupPlanner
                 var gain = missing.Count(g => Contributes(i, g, counts));
                 var extra = _native[i].Count(c => _additionalNames.Contains(c));
                 var heal = needHealer && _healer[i] ? 5 : 0;
-                branches.Add((i, 10 * gain + heal + 0.8 * extra + (i * 13 % 31) / 50.0));
+                branches.Add((i, 10 * gain + heal + 0.8 * extra + _preference[i] + (i * 13 % 31) / 50.0));
             }
 
             // A solo covenant can make the requested people count impossible to

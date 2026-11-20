@@ -1,0 +1,6 @@
+{
+  "mode_multi_funny": {"name":"标准模拟","core":0,"additional":2,"inactive":["阿戈尔","卡西米尔","灵巧","奇迹","投资人","突袭","独行","绝技"]},
+  "mode_multi_normal": {"name":"险境模拟","core":5,"additional":5,"inactive":[]},
+  "mode_multi_hard": {"name":"绝境模拟","core":5,"additional":5,"inactive":[]},
+  "mode_multi_abyss": {"name":"终极模拟","core":5,"additional":5,"inactive":[]}
+}

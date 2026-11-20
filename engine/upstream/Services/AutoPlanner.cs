@@ -83,6 +83,7 @@ public sealed class AutoPlanner
                     BannedCovenants = request.BannedCovenants,
                     BannedOperators = request.BannedOperators,
                     LockedOperators = request.LockedOperators,
+                    Preferred = request.Preferred,
                     TransformAllowed = request.TransformAllowed,
                     ExcludeMixedBannedOperators = request.ExcludeMixedBannedOperators,
                     PeopleOptions = [request.People],
@@ -94,7 +95,7 @@ public sealed class AutoPlanner
                 if (result.Error is not null) return (null, result.Error, limited);
                 final = result.AllLineups
                     .OrderBy(l => l.MissingHealer).ThenBy(l => l.FreeSlots)
-                    .ThenByDescending(l => l.AdditionalScore)
+                    .ThenByDescending(l => l.AdditionalScore + l.Operators.Sum(o => request.Preferred.GetValueOrDefault(o.Name)))
                     // Same 小盟约: the higher-tier lineup is the stronger boss lineup.
                     .ThenByDescending(l => l.Operators.Sum(o => _byName.TryGetValue(o.Name, out var op) ? op.Tier : 0))
                     .ThenBy(l => l.ForcedTransforms)

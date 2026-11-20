@@ -1143,3 +1143,11 @@ dialog:has(.quick-editor) { width: min(960px,96vw); padding: 16px; }
 .plan-progression ol { padding:0; margin:8px 0 0; list-style:none; }
 .plan-progression li { display:grid; grid-template-columns:3em 1fr; gap:6px; margin:5px 0; line-height:1.5; }
 .plan-progression li small { color:var(--muted); }
+.map-head.map-preview-head { display:flex; gap:16px; align-items:center; padding:10px; flex-wrap:wrap; }
+.map-photo { padding:0; width:clamp(230px,36%,340px); max-width:100%; background:var(--section); border:0; cursor:zoom-in; }
+.map-photo img,.map-gallery img,.map-expanded { display:block; object-fit:contain; width:100%; height:auto; border-radius:5px; }
+.map-expanded { width:min(100%,900px); margin:0 auto 12px; }
+.map-gallery { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,195px),1fr)); gap:10px; }
+.map-gallery button { padding:5px; background:var(--paper); border:1px solid var(--edge); color:var(--ink); text-align:left; border-radius:6px; }
+.map-gallery strong { display:block; padding:5px; }
+.map-gallery [aria-pressed=true] { outline:2px solid var(--accent); }

@@ -47,6 +47,7 @@ public sealed class AutoPlanRequest
     public IReadOnlySet<string> BannedOperators { get; init; } = new HashSet<string>();
     /// <summary>Operators every plan has to contain (already on the board).</summary>
     public IReadOnlySet<string> LockedOperators { get; init; } = new HashSet<string>();
+    public IReadOnlyDictionary<string,int> Preferred { get; init; } = new Dictionary<string,int>();
     /// <summary>Covenants an operator may be transformed into (see <c>LineupPlanner.DefaultTransformAllowed</c>).</summary>
     public IReadOnlySet<string> TransformAllowed { get; init; } = new HashSet<string>();
     public bool ExcludeMixedBannedOperators { get; init; } = true;

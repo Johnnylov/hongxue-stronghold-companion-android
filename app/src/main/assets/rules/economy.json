@@ -3,6 +3,7 @@
   "season": "act3autochess/V3_1",
   "field": "shopLevelDataDict[mode][currentLevel].initialUpgradePrice",
   "refreshCost": 1,
+  "recruitPrices": [null, 2, 3, 3, 3, 4, 4],
   "prices": {
     "mode_single_funny": [
       1,
@@ -215,7 +216,7 @@
     "mode_single_20": {
       "label": "规程等级 20 实战参考",
       "amounts": [null, 4, 5, 6, null, null, 9, 10, 11, 11, null, 11, 11, 11, 11, 11],
-      "note": "对照两局等级 20 录像，仅列实领与等级 1 基础参考吻合的回合。第 16 回合待核实。",
+      "note": "对照两局等级 20 录像，仅列实领与等级 1 基础参考吻合的回合。",
       "sources": ["https://www.bilibili.com/video/BV12ZWP6pE7m/?t=14", "https://www.bilibili.com/video/BV1LtsL6iEUd/?t=61"]
     },
     "mode_multi_abyss": {

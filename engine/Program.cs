@@ -59,6 +59,7 @@ public partial class TabletEngine
         public int? Round { get; set; }
         public int? Upgrade { get; set; }
         public HashSet<string> Owned { get; set; } = [];
+        public Dictionary<string,int> Preferred { get; set; } = [];
         public Lineup Team { get; set; } = new();
         public AutoPlanCandidate? Candidate { get; set; }
         public PlannedRoute? SavedRoute { get; set; }
@@ -125,7 +126,7 @@ public partial class TabletEngine
         var auto=new AutoPlanner(planner,routePlanner,ops);
         var availableLocks=ops.Where(o=>r.Locked.Contains(o.Name) && !r.Banned.Contains(o.Name)
             && !planner.IsExcludedByBans(o,r.BannedBonds)).Select(o=>o.Name).ToHashSet();
-        var autoReq=new AutoPlanRequest {BannedOperators=r.Banned,BannedCovenants=r.BannedBonds,LockedOperators=availableLocks,
+        var autoReq=new AutoPlanRequest {BannedOperators=r.Banned,BannedCovenants=r.BannedBonds,LockedOperators=availableLocks,Preferred=r.Preferred,
             TransformAllowed=planner.DefaultTransformAllowed(r.BannedBonds),People=r.People,Strategy=(PlannerStrategy)r.Strategy,MechElite=r.MechElite};
         if(action=="auto") { lastAuto=auto.Plan(autoReq); return lastAuto; }
         if(action=="advice")
@@ -135,7 +136,7 @@ public partial class TabletEngine
         }
         if(action=="autoRoute")
         {
-            var candidate=lastAuto!.Candidates[r.Index];
+            var candidate=r.Candidate ?? lastAuto!.Candidates[r.Index];
             var route=auto.PlanRoute(candidate,(AutoPlanStyle)r.Style,autoReq);
             var economy=new ShopEconomy(r.Round,r.Money,r.Upgrade,r.Terminal>=6,null,true);
             var advice=auto.Advise(route.Route,(AutoPlanStyle)r.Style,candidate,new AutoPlanRunState(r.Terminal,economy,r.Owned));

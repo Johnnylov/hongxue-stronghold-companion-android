@@ -238,7 +238,7 @@ const Teams = (() => {
   function pane(t) {
     queueMicrotask(() => updateCounts(t));
     return (
-      `<div class="actions controls">${W.act("team-layout", "阶段与回合")}${W.act("team-targets", "目标盟约")}${W.act("team-strategy", "策略")}${W.act("team-review", "本局推荐 / 修补")}${W.act("team-share", "分享阵容")}${W.act("team-reminders", "升本提醒")}${t.autoPlan ? W.act("team-advice", "查看自动路线") : ""}</div><div id="team-counts" class="hint"></div>` +
+      `<div class="actions controls">${W.act("team-workshop","阵容推演")}${W.act("team-layout", "阶段与回合")}${W.act("team-targets", "目标盟约")}${W.act("team-strategy", "策略")}${W.act("team-review", "本局推荐 / 修补")}${W.act("team-share", "分享阵容")}${W.act("team-reminders", "升本提醒")}${t.autoPlan ? W.act("team-advice", "查看自动路线") : ""}</div><div id="team-counts" class="hint"></div>` +
       (Object.keys(t.goals || {}).length || t.strategyIds?.length
         ? `<div class="tags">${Object.entries(t.goals || {})
             .map(([k, n]) => tag(k + (n === 2 ? " Ⅱ" : " Ⅰ")))
@@ -394,6 +394,7 @@ const Teams = (() => {
   async function click(a, v) {
     const t = viewing() || active(),
       i = Number(v);
+    if (a==="team-workshop" && t) {db.active=t.id;move("planner");void Planning.click("plan-tab","workshop");return;}
     if (a === "team-import") {
       importDialog();
       return;
@@ -419,7 +420,7 @@ const Teams = (() => {
         }
         const g = fromPC(JSON.parse(text));
         previewStage = 0;
-        incorporate(g);
+        incorporate(g,0,[],db.page==="planner" && db.planning?.kind==="workshop" ? "planner" : "teams");
       } catch (e) {
         msg.textContent = "导入失败：" + e.message;
       }
@@ -554,7 +555,7 @@ const Teams = (() => {
             (s, j) => i !== j && s.start && n <= s.end && m >= s.start,
           ))
       ) {
-        toast("请选择第 1–16 回合内的区间，各阶段不能重叠");
+        toast("请选择第 1–15 回合内的区间，各阶段不能重叠");
         return;
       }
       t.stages[i].start = n || null;
@@ -625,7 +626,7 @@ const Teams = (() => {
         ...t.autoPlan,
       });
       popup(
-        `<h2>自动路线</h2><p>当前 ${db.run.terminal} 本 · 第 ${db.run.round} 回合</p>${advice.map((x, i) => `<article class="note"><h4>${esc(t.autoPlan.savedRoute.stages[i].definition.name)}</h4><p>${esc(x.focus)}　${esc(x.upgradeText)}</p><p>${esc((x.reserve || []).map((p) => p.name).join("、"))}</p></article>`).join("")}`,
+        `<h2>自动路线</h2><p>当前 ${db.run.terminal} 本 · 第 ${db.run.round} 回合</p>${advice.map((x, i) => `<article class="note"><h4>${esc(t.autoPlan.savedRoute.stages[i].definition.name)}</h4>${(x.levels || []).map(Planning.levelCard).join("")}</article>`).join("")}`,
       );
       return;
     }

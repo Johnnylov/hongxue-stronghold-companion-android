@@ -8,6 +8,9 @@ const Planning = (() => {
     task = 0,
     working = false,
     err = "";
+  let attempted = "", pendingSnapshot = "", autoBank, matchSettings = false;
+  let stageAdvice=[];
+  const routeCache=new WeakMap();
   function state() {
     return (db.planning ||= {
       kind: "target",
@@ -21,8 +24,18 @@ const Planning = (() => {
   }
   function payload() {
     const req = { ...W.request(), ...state() };
-    if (req.kind === "auto" && req.people === 0) req.people = 8;
-    if (req.onlyRun === false) {
+    if (req.kind === "auto") {
+      const held = PlanMatch.holdings();
+      req.people ||= 8;
+      req.locked = [];
+      req.owned = held.map(u=>u.name);
+      req.preferred = PlanMatch.weights(held);
+      req.custom = [...new Set([...req.custom,...req.owned.filter(n=>W.rawOps[n].isCustom)])];
+      req.modeId = db.run.mode;
+      const income = Economy.funding(db.run.mode,req.round,W.data.economy);
+      req.estimated = req.money == null && !!income;
+      if (req.estimated) req.money = Economy.balance(income.amount + ItemIncome.total(db.run));
+    } else if (req.onlyRun === false) {
       req.banned = [];
       req.bannedBonds = [];
     } else {
@@ -37,18 +50,66 @@ const Planning = (() => {
     choice = null;
     outcome = null;
     display = null;
+    stageAdvice=[];
     working = false;
     err = "";
+    attempted = "";
+    pendingSnapshot = "";
     task++;
   }
+  function autoSearch(req) {
+    // Cash, terminal and upgrade price change the ordering and advice locally.
+    const key = JSON.stringify([req.people,req.strategy,req.mechElite,req.preferred,req.custom,req.banned,req.bannedBonds]);
+    if (autoBank?.key !== key) {
+      const entry = {key,promise:W.engine("auto",req)};
+      autoBank = entry;
+      entry.promise.catch(()=>{ if(autoBank===entry) autoBank=null; });
+    }
+    return autoBank.promise;
+  }
+  async function automaticRoute(candidate,style,req,index) {
+    // The route depends on lineup and style. Re-evaluate its advice when the live shop changes.
+    const shop={...req,money:req.estimated?null:req.money,index,style,candidate};
+    let variants=routeCache.get(candidate);
+    if (!variants) { variants=new Map();routeCache.set(candidate,variants); }
+    const key=JSON.stringify([shop.terminal,shop.round,shop.money,shop.upgrade,shop.owned]);
+    let cached=variants.get(style);
+    if (!cached) {
+      cached={key,result:W.engine("autoRoute",shop)};
+      variants.set(style,cached);
+      cached.result.catch(()=>{if(variants.get(style)===cached) variants.delete(style);});
+    }
+    const result=await cached.result;
+    if (cached.key===key) return result;
+    const advice=await W.engine("advice",{...shop,savedRoute:result.route});
+    return {...result,advice};
+  }
+  function levelCard(level) {
+    const picks=level.reserve || [];
+    return `<section class="level-advice" data-advice-level="${Number(level.terminalLevel)}">
+      <h4>${esc(level.title)}</h4><dl>
+      <dt>当前目标</dt><dd>${esc(level.focus)}</dd>
+      <dt>优先购买</dt><dd class="advice-purchases">${esc(level.purchaseText || "本级暂无优先购买人选")}</dd>
+      <dt>升本条件</dt><dd>${esc(level.upgradeText)}</dd>
+      <dd class="hint">${esc(level.economyText)}</dd>
+      ${picks.length?`<dt>提前留牌</dt><dd>有余钱与空位再买，先留足关键购买和升级资金。</dd><dd class="advice-reserve">${picks.map(p=>`<button type="button" data-act="item" ${attr("key","op:"+p.name)}>${portrait("op:"+p.name)}<span><strong>${esc(p.name)}</strong><small>${esc(p.neededAt)}用</small></span></button>`).join("")}</dd>`:""}</dl></section>`;
+  }
+  function tabs(kind) {
+    return '<div class="segments controls">' + [["target","目标规划"],["auto","自动推荐"],["workshop","阵容推演"]]
+      .map(([id,label])=>W.act("plan-tab",label,id===kind?"chosen":"",id)).join("") + '</div>';
+  }
   function render() {
+    if (state().kind === "workshop") { Workshop.render(); return; }
+    document.body.classList.remove("workshop-open");
     const p = state(),
       auto = p.kind === "auto";
-    if (outcome && outcome.snapshot !== fingerprint()) invalidate();
+    const multiplayer = W.data.multiplayer_bans[db.run.mode];
+    const snap = fingerprint();
+    if ((outcome && outcome.snapshot !== snap) || (working && pendingSnapshot !== snap)) invalidate();
     desk.innerHTML =
       W.head("阵容规划") +
       NextStep.progression() +
-      `<div class="segments controls">${W.act("plan-tab", "目标规划", auto ? "" : "chosen", "target")}${W.act("plan-tab", "自动推荐", auto ? "chosen" : "", "auto")}</div>
+      `${tabs(p.kind)}
       <div class="filtergrid">${W.control("上场人数", W.select("plan-people", auto ? [8, 9] : [[0, "全部 · 8 / 9 人"], 8, 9], auto ? p.people || 8 : p.people))}${W.control(
         "规划策略",
         W.select(
@@ -79,7 +140,7 @@ const Planning = (() => {
             )
           : ""
       }</div>
-      <label class="checkline"><input type="checkbox" id="plan-only" ${p.onlyRun !== false ? "checked" : ""}> 只看本局可用干员与盟约</label>
+      ${auto ? "" : `<label class="checkline"><input type="checkbox" id="plan-only" ${p.onlyRun !== false ? "checked" : ""}> 只看本局可用干员与盟约</label>`}
       ${p.strategy === 1 ? `<label class="checkline"><input type="checkbox" id="plan-mech" ${p.mechElite ? "checked" : ""}> 暴躁铁皮已精锐</label>` : ""}
       ${
         !auto
@@ -94,9 +155,15 @@ const Planning = (() => {
             }</div>`
           : ""
       }
-      ${section("必带干员", W.act("plan-lock", "选择干员", "linkbtn"))}<div class="tags">${p.locked.map((n) => tag(n + (W.isBanned(n) ? " · 本局暂停" : ""))).join("") || "<p class='hint'>未指定</p>"}</div>
-      <div class="actions controls">${W.act("plan-solve", working ? "正在计算…" : auto ? "推荐主盟约与路线" : "搜索阵容", "btn gold")}${working ? W.act("plan-cancel", "取消计算") : ""}</div>
+      ${auto ? `<div class="match-inputs" role="group" aria-label="多人难度">${Object.entries(W.data.multiplayer_bans).map(([id,m])=>`<button class="chip" data-w="plan-mode" data-v="${esc(id)}" aria-pressed="${db.run.mode===id}">${esc(m.name)}</button>`).join("")}</div>
+        <div class="match-inputs"><b>持有 ${PlanMatch.holdings().length} 名 · ${db.run.terminal} 本 · ${db.run.money==null?"余额未录":"资金 "+db.run.money}</b>${W.act("owned","调整持有","linkbtn")}${W.act("ban-bonds","本局 Ban","linkbtn")}${W.act("plan-run-settings",matchSettings?"收起对局设置":"对局设置","linkbtn")}</div>${matchSettings ? W.runPanel() : ""}`
+        : section("必带干员", W.act("plan-lock", "选择干员", "linkbtn")) + `<div class="tags">${p.locked.map((n) => tag(n + (W.isBanned(n) ? " · 本局暂停" : ""))).join("") || "<p class='hint'>未指定</p>"}</div>`}
+      <div class="actions controls">${auto && !multiplayer ? "<p>点选本局的多人难度后查看推荐。</p>" : W.act("plan-solve", working ? "正在计算…" : auto ? "更新本局推荐" : "搜索阵容", "btn gold")}${working ? W.act("plan-cancel", "取消计算") : ""}</div>
       <div id="plan-output" aria-live="polite">${err ? `<p class="error">${esc(err)}</p>` : ""}${outcome ? results() : ""}</div>`;
+    if (auto && multiplayer && !outcome && !working && attempted !== snap) {
+      attempted = snap;
+      setTimeout(()=>{ if (db.page==="planner" && state().kind==="auto" && !working && !outcome && attempted===snap && fingerprint()===snap) void click("plan-solve"); }, 40);
+    }
   }
   // v1.9.4's ordinary terminal pool admits tiers up to its level. The catalogue
   // merges both custom slots, and the two strategy grants never use the shop pool.
@@ -161,7 +228,13 @@ const Planning = (() => {
   function results() {
     const { value, auto } = outcome,
       rows = auto ? value.candidates : value.plans;
+    const req = payload();
+    const ranked = auto ? PlanMatch.rank(rows || [],req) : null;
+    const selectedPlan=ranked?.find(r=>r.index===choice?.index) || ranked?.[0];
+    const level=stageAdvice.flatMap(a=>a.levels || []).find(l=>l.terminalLevel===req.terminal);
     return (
+      (selectedPlan ? PlanMatch.summary(selectedPlan,req,level,selectedPlan===ranked[0]) : "") +
+      (auto && level ? levelCard(level) : "") +
       section(auto ? "候选主盟约" : "候选阵容", `<small class="hint">本局终端 ${esc(db.run.terminal)} 本</small>`) +
       (value.limited || value.searchLimited
         ? `<p class="hint">已到搜索上限，以下为当前找到的候选。</p>`
@@ -169,20 +242,43 @@ const Planning = (() => {
       (value.error ? `<p class="error">${esc(value.error)}</p>` : "") +
       (!rows?.length
         ? empty("没有找到候选", "可以调整目标、必带干员或转职次数再试。")
-        : `<div class="listbox">${rows
-            .map((r, i) => candidateCard(r, i, auto, rows))
+        : `<div class="listbox">${(ranked ? ranked.map(x=>candidateCard(x.candidate,x.index,true,rows)) :
+            rows.map((r, i) => candidateCard(r, i, false, rows)))
             .join("")}</div>`)
     );
   }
   function routeHtml(g) {
-    return `<article id="route-result">${section(g.title, W.act("plan-save", "保存并追踪", "btn gold"))}${g.stages.map(s => {
+    return `<article id="route-result">${section(g.title, W.act("plan-workshop", "在阵容推演打开", "btn light") + W.act("plan-save", "保存并追踪", "btn gold"))}${g.stages.map((s,i) => {
       const units = s.entries.filter(e => e.key.startsWith("op:"));
       return `<details class="note"><summary>${esc(GuideModel.stageText(s))} · ${s.terminalLevel} 本 · ${units.length} 人</summary>
         <div class="plan-members recruit-members">${units.map(e => memberCard(e.key.slice(3), e.transformedCovenant, e.viaTriple && s.terminalLevel)).join("")}</div>
-        <p>${esc(s.note)}</p></details>`;
+        <p>${esc(s.note)}</p>${(stageAdvice[i]?.levels || []).map(levelCard).join("")}</details>`;
     }).join("")}</article>`;
   }
-  async function click(a, v) {
+  function routeKey(team) {
+    if (!team.conditions) return null;
+    const auto = team.autoPlan;
+    const stages = auto?.savedRoute?.stages?.map(s=>[s.definition.name,s.definition.terminalLevel,
+      s.operators.map(o=>JSON.stringify([o.name,o.transformedCovenant || "",o.role,!!o.viaTriple])).sort()]) ||
+      team.stages.map(s=>[s.label,s.terminalLevel,s.entries.map(e=>JSON.stringify([e.key,e.transformedCovenant || "",e.role,!!e.viaTriple])).sort()]);
+    return JSON.stringify([auto?.candidate?.mainCovenant || "",auto?.style ?? null,team.strategyIds || [],
+      Object.entries(team.goals || {}).sort(),stages]);
+  }
+  function trackRoute(guide, editor) {
+    if (editor) state().kind="workshop";
+    const id = routeKey(guide);
+    const existing = [active(), ...db.teams].find(t=>t && routeKey(t)===id);
+    db.prefs.basketTab = "shop";
+    if (existing) {
+      db.active = existing.id;
+      move(editor?"planner":"teams",existing.id);
+      return;
+    }
+    let stage = 0;
+    guide.stages.forEach((s,i)=>{ if (!s.isFinal && s.terminalLevel <= db.run.terminal) stage=i; });
+    incorporate(guide,stage,RunLineups.ownedTokens(guide),editor?"planner":"teams");
+  }
+  async function click(a, v, reveal=true) {
     const p = state();
     if (a === "plan-tab") {
       invalidate();
@@ -193,8 +289,23 @@ const Planning = (() => {
     }
     if (a === "plan-cancel") {
       W.stopEngine();
+      autoBank=null;
       invalidate();
+      attempted=fingerprint();
       render();
+      return;
+    }
+    if (a === "plan-run-settings") {
+      matchSettings=!matchSettings;
+      render();
+      return;
+    }
+    if (a === "plan-mode") {
+      if (!W.data.multiplayer_bans[v] || v===db.run.mode) return;
+      db.run.mode=v;
+      db.run.upgrade=null;
+      Maps.bansChanged();
+      persist(); render(); renderBasket();
       return;
     }
     if (a === "plan-lock") {
@@ -225,9 +336,8 @@ const Planning = (() => {
       }, p.onlyRun !== false);
       return;
     }
-    if (a === "plan-save" && display) {
-      previewStage = 0;
-      incorporate(display);
+    if ((a === "plan-save" || a === "plan-workshop") && display) {
+      trackRoute(display,a==="plan-workshop");
       return;
     }
     if (working && !(a === "plan-route" && workKind === "plan-route")) return;
@@ -239,7 +349,11 @@ const Planning = (() => {
       toast("请先选择目标盟约");
       return;
     }
+    stageAdvice=[];
+    let defaultRoute=null;
     workKind = a;
+    pendingSnapshot = snap;
+    attempted = snap;
     if (a === "plan-route") {
       const [index, style] = v.split("/").map(Number);
       choice = { index, style };
@@ -253,18 +367,20 @@ const Planning = (() => {
     render();
     try {
       if (a === "plan-solve") {
-        const value = await W.engine(automatic ? "auto" : "target", req);
+        const value = await (automatic ? autoSearch(req) : W.engine("target",req));
         if (ticket !== task || snap !== fingerprint()) return;
         outcome = { snapshot: snap, value, auto: automatic };
+        if (automatic && value.candidates?.length) {
+          const best=PlanMatch.rank(value.candidates,req)[0];
+          defaultRoute=best.index+"/"+(best.candidate.recommendedStyle || 0);
+        }
         display = null;
       } else if (a === "plan-route") {
         const [index, style] = v.split("/").map(Number);
-        const response = await W.engine(automatic ? "autoRoute" : "route", {
-          ...req,
-          index,
-          style,
-        });
+        const response=automatic ? await automaticRoute(outcome.value.candidates[index],style,req,index)
+          : await W.engine("route",{...req,index,style});
         if (ticket !== task || snap !== fingerprint()) return;
+        stageAdvice=response.advice || [];
         const route = response.route || response,
           candidate = automatic
             ? outcome.value.candidates[index].final
@@ -351,7 +467,8 @@ const Planning = (() => {
         working = false;
         if (db.page === "planner") {
           render();
-          if (display && a === "plan-route")
+          if(defaultRoute) void click("plan-route",defaultRoute,false);
+          if (reveal && display && a === "plan-route")
             $("route-result")?.scrollIntoView({ block: "nearest" });
         }
       }
@@ -359,7 +476,7 @@ const Planning = (() => {
   }
   const peopleSecond = ["精准", "坚守", "助力", "不屈", "聚合", "奥术"];
   function runGoalLevel(c, level) {
-    if (!level || !db.run.bannedBonds.includes(c.name)) return level;
+    if (!level || !W.effectiveBonds().includes(c.name)) return level;
     if (c.bondType === "SEASON") return 0;
     const available = W.availableHolders(c.name);
     if (available < (c.activateCount ?? 2)) return 0;
@@ -373,7 +490,7 @@ const Planning = (() => {
     const cov = W.data.covenants.covenants.filter((c) => c.name !== "绝技"),
       single = ["独行", "协防干员", "调和"];
     function setting(c, i) {
-      const grey = useRun && db.run.bannedBonds.includes(c.name);
+      const grey = useRun && W.effectiveBonds().includes(c.name);
       const core = c.bondType === "SEASON";
       const options = [[0, "未指定"]];
       const maxLevel = useRun ? runGoalLevel(c, 2) : 2;
@@ -409,5 +526,5 @@ const Planning = (() => {
     persist();
     render();
   });
-  return { render, click, chooseGoals, recruitment };
+  return { render, click, chooseGoals, recruitment, tabs, levelCard };
 })();

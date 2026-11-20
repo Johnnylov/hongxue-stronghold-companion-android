@@ -41,7 +41,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     assert page.evaluate('db.page === "map" && !!active()')
     page.evaluate("""() => {
         const team=active(); team.stages=[{label:'开局',entries:[{key:'op:深靛',elite:true},{key:'op:蓝毒'}]}];
-        team.stage=0; Object.assign(db.run,{terminal:2,round:3,upgrade:5,money:1,counts:{'深靛':2},elite:{}});
+        team.stage=0; Object.assign(db.run,{mode:"mode_multi_abyss",terminal:2,round:3,upgrade:5,money:1,counts:{'深靛':2},elite:{}});
         render();
     }""")
     expect(panel).to_contain_text("深靛 ×1")

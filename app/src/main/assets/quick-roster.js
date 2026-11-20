@@ -74,6 +74,15 @@ const QuickRoster = (() => {
     }
     stage.entries = [...stage.entries.filter(e => keep.has(e)), ...added];
   }
+  function cardActions(scope,key,name,elite,onField,editable=true) {
+    const controls=editable ? [["copy","＋1","增加一份"],["elite","精",elite?"改为普通":"标为精锐"]] : [];
+    controls.push(["field","✓",onField?"移回整备区":"上场"]);
+    if(editable) controls.push(["remove","×","删除这一份"]);
+    return '<div class="unit-actions">'+controls.map(([code,text,label])=>{
+      const pressed=code==="field"?onField:code==="elite"?elite:null;
+      return `<button type="button" data-w="${scope}-card-${code}" data-v="${esc(key)}" aria-label="${esc(name+" · "+label)}" title="${esc(label)}"${pressed==null?"":' aria-pressed="'+!!pressed+'"'}>${text}</button>`;
+    }).join("")+'</div>';
+  }
   function numbers(unit, action) {
     const cost = mergeSize(unit.name), plain = unit.count - unit.elite;
     function choice(key, value, label, pressed) {
@@ -106,9 +115,13 @@ const QuickRoster = (() => {
     el.classList.toggle("focused", el.dataset.unit === draft.focus);
     el.querySelector("[data-quick-focus]").setAttribute("aria-pressed", String(el.dataset.unit === draft.focus));
     const toggle = el.querySelector("[data-quick-toggle]");
-    toggle.textContent = p?.count ? "✓" : "＋";
+    toggle.textContent = p?.count ? "×" : "＋1";
+    for(const btn of el.querySelectorAll("[data-quick-step]")) btn.hidden=!p?.count;
+    const elite=el.querySelector('[data-quick-step="elite"]'), allElite=!!p?.count && p.count===p.elite;
+    elite.setAttribute("aria-pressed",String(allElite));
+    elite.setAttribute("aria-label",(allElite?"一份改为普通 ":"标记一份精锐 ")+el.dataset.unit);
     toggle.setAttribute("aria-pressed", String(!!p?.count));
-    toggle.setAttribute("aria-label", (p?.count ? "移除 " : "加入 ") + el.dataset.unit);
+    toggle.setAttribute("aria-label", (p?.count ? "移除一份 " : "加入 ") + el.dataset.unit);
     el.querySelector("small").textContent = p?.count ? (p.count-p.elite)+" 普通 · "+p.elite+" 精锐" : info("op:"+el.dataset.unit).tier+" 阶";
   }
   function grid() {
@@ -119,7 +132,7 @@ const QuickRoster = (() => {
     const host = $("quick-grid");
     host.innerHTML = names.map(n => `<div class="quick-card" data-unit="${esc(n)}">
       <button type="button" data-quick-focus>${portrait("op:"+n)}<span><strong>${esc(n)}</strong><small></small></span></button>
-      <button type="button" data-quick-toggle></button></div>`).join("") || '<p class="hint">没有符合筛选的干员。</p>';
+      <div class="quick-card-actions"><button type="button" data-quick-step="buy" aria-label="增加一份 ${esc(n)}">＋1</button><button type="button" data-quick-step="elite" aria-label="标记一份精锐 ${esc(n)}">精</button><button type="button" data-quick-toggle></button></div></div>`).join("") || '<p class="hint">没有符合筛选的干员。</p>';
     host.querySelectorAll("[data-unit]").forEach(paintCard);
   }
   function refresh(oldName) {
@@ -186,11 +199,16 @@ const QuickRoster = (() => {
     const name = b.closest("[data-unit]")?.dataset.unit;
     if (!name) return;
     const p = draft.rows.get(name) || {name, count:0, elite:0};
-    if (b.hasAttribute("data-quick-toggle") && p.count) setNumber(p,"remove",0);
+    if (b.dataset.quickStep==="buy") setNumber(p,"buy",1);
+    else if (b.dataset.quickStep==="elite") p.elite+=p.count>p.elite?1:-1;
+    else if (b.hasAttribute("data-quick-toggle") && p.count) {
+      if (p.count===p.elite) p.elite--;
+      p.count--;
+    }
     else if (!p.count) p.count = 1;
     draft.rows.set(name, p);
     draft.focus = name;
     refresh(old);
   });
-  return {open, owned, setOwned, fromStage, applyStage, numbers, setNumber, normalize, normalizeOwned, rawCopies, purchaseFloor};
+  return {cardActions, mergeSize, open, owned, setOwned, fromStage, applyStage, numbers, setNumber, normalize, normalizeOwned, rawCopies, purchaseFloor};
 })();

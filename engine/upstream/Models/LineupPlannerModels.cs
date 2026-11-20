@@ -52,6 +52,7 @@ public sealed class PlannerRequest
     public IReadOnlySet<string> BannedCovenants { get; init; } = new HashSet<string>();
     public IReadOnlySet<string> BannedOperators { get; init; } = new HashSet<string>();
     public IReadOnlySet<string> LockedOperators { get; init; } = new HashSet<string>();
+    public IReadOnlyDictionary<string,int> Preferred { get; init; } = new Dictionary<string,int>();
 
     /// <summary>Covenants an operator may be transformed into. Callers normally pass <c>LineupPlanner.DefaultTransformAllowed</c>.</summary>
     public IReadOnlySet<string> TransformAllowed { get; init; } = new HashSet<string>();

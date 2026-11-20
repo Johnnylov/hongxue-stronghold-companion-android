@@ -1,0 +1,55 @@
+html[data-skin] body.workshop-open main {display:block}
+body.workshop-open #basket {display:none}
+.ws-layout {display:grid;grid-template-columns:minmax(215px,.95fr) minmax(360px,1.85fr) minmax(175px,.7fr);align-items:start;gap:12px}
+.ws-layout > * {min-width:0;padding:12px;border:1px solid var(--edge);border-radius:10px;background:var(--paper)}
+.ws-layout .sectionhead {flex-wrap:wrap}
+.ws-layout h2 {font-size:19px}
+.ws-layout .segments {display:flex}
+.ws-tiers,.ws-toolbar,.ws-team,.ws-stages {display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:8px 0}
+.ws-team select,.ws-library select {max-width:100%}
+.ws-toolbar {justify-content:space-between}
+.ws-toolbar span,.ws-piece small,.ws-library-grid small,.ws-bonds span {color:var(--muted);font-size:13px}
+.ws-library-grid,.ws-slots {display:grid;gap:6px;margin:8px 0}
+.ws-library-grid {grid-template-columns:repeat(auto-fill,minmax(76px,1fr));max-height:57vh;overflow:auto;align-content:start}
+.ws-slots {grid-template-columns:repeat(auto-fill,minmax(91px,1fr))}
+.ws-slots .hint {grid-column:1/-1}
+.ws-library-grid button,.ws-piece,.ws-bonds button[data-w=reference] {display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;background:var(--panel);color:var(--ink);border:1px solid var(--edge);border-radius:6px;padding:6px;text-align:center}
+.ws-library-grid strong,.ws-piece strong {line-height:1.3;font-size:15px;overflow-wrap:anywhere}
+.ws-library-grid .portrait,.ws-piece .portrait {width:min(100%,70px);height:auto;aspect-ratio:1;object-fit:contain;border-radius:5px}
+.ws-piece .portrait {width:min(100%,82px)}
+.ws-stage .ws-piece[aria-pressed=true],.ws-layout .chosen {outline:2px solid var(--accent);outline-offset:-2px}
+.ws-layout .btn,.ws-layout .chip,.ws-layout .linkbtn {min-height:40px}
+.ws-tiers .chip {padding:4px 10px}
+.ws-inspector {margin-top:12px;padding:12px;background:var(--panel);border-radius:7px}
+.ws-bonds button[data-w=reference] {width:100%;align-items:stretch;flex-direction:row;justify-content:space-between;align-items:center;gap:5px;margin:4px 0;min-height:43px;text-align:left}
+dialog:has(.map-expanded),dialog:has(.map-gallery) {width:min(980px,94vw)}
+@media(max-width:920px) {
+  .ws-layout {grid-template-columns:minmax(190px,.82fr) minmax(300px,1.5fr)}
+  .ws-bonds {grid-column:1/-1}
+}
+@media(max-width:630px) {
+  .ws-layout {grid-template-columns:minmax(0,1fr)}
+  .ws-library-grid {max-height:215px}
+}
+
+.ws-mode {display:flex;align-items:center;gap:8px;margin:0 0 8px;color:var(--muted)}
+.ws-mode {white-space:nowrap}
+.ws-mode select {flex:1;min-width:0}
+.unit-key {color:var(--muted);font-size:13px;margin:8px 0;line-height:1.55}
+.ws-slots {grid-template-columns:repeat(auto-fill,minmax(min(100%,194px),1fr))}
+.ws-card,.map-unit-card {min-width:0;background:var(--paper);border:1px solid var(--edge);border-radius:8px;overflow:hidden}
+.ws-card .ws-piece,.map-unit-card .deploy-card {width:100%;border-top:0;border-right:0;border-bottom:0;border-radius:0}
+.ws-card .ws-piece {position:relative;display:grid;grid-template-columns:64px minmax(0,1fr);align-items:center;justify-items:start;column-gap:9px;padding:6px;text-align:left;min-height:78px;background:var(--panel);border:0}
+.ws-card .ws-piece .portrait {grid-column:1;grid-row:1 / span 4;width:64px}
+.ws-card .ws-piece :is(strong,small) {grid-column:2}
+.unit-actions,.quick-card-actions {display:flex;align-items:stretch;gap:4px;padding:3px}
+.unit-actions {border-top:1px solid var(--line)}
+.unit-actions button,.quick-card .quick-card-actions button {flex:1;min-width:44px;min-height:44px;padding:2px;border-radius:5px;border:1px solid var(--edge);color:var(--ink);background:var(--paper);font-size:17px;touch-action:manipulation}
+.unit-actions button[aria-pressed=true],.quick-card .quick-card-actions button[aria-pressed=true] {background:var(--tint);color:var(--accent);border-color:var(--accent)}
+.unit-actions button:last-child[data-w$="-remove"],.quick-card-actions [data-quick-toggle][aria-pressed=true] {color:var(--danger);background:var(--paper);border-color:var(--edge)}
+.deploy-roster {grid-template-columns:repeat(auto-fill,minmax(min(100%,195px),1fr))}
+#quick-grid {grid-template-columns:repeat(auto-fill,minmax(156px,1fr))}
+.quick-card {display:flex;flex-direction:column}
+.quick-card-actions {justify-content:flex-end}
+.quick-card .quick-card-actions button {flex:0 1 48px}
+.quick-card [hidden] {display:none}

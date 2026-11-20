@@ -4,6 +4,8 @@ const Workbench = (() => {
     "operators",
     "custom_operators",
     "ban_index",
+    "multiplayer_bans",
+    "multiplayer_thresholds",
     "operator_profiles",
     "custom_operator_profiles",
     "covenants",
@@ -31,7 +33,7 @@ const Workbench = (() => {
     terminal: 1,
     money: null,
     upgrade: null,
-    mode: "mode_single_funny",
+    mode: "mode_multi_funny",
     boss: "",
     enemyTypes: [],
     elite: {},
@@ -152,7 +154,7 @@ const Workbench = (() => {
   function request() {
     return {
       banned: db.run.banned,
-      bannedBonds: db.run.bannedBonds,
+      bannedBonds: effectiveBonds(),
       custom: db.prefs.custom,
       terminal: db.run.terminal,
       round: db.run.round,
@@ -169,14 +171,17 @@ const Workbench = (() => {
       bannedByBonds(name, db.run.bannedBonds)
     );
   }
+  function fixedBonds() { return data.multiplayer_bans[db.run.mode]?.inactive || []; }
+  function effectiveBonds() { return [...new Set([...fixedBonds(), ...db.run.bannedBonds])]; }
   function bannedByBonds(name, selected) {
-    if (!selected.length) return false;
+    const fixed = fixedBonds();
+    if (!selected.length && !fixed.length) return false;
     const rule = data.ban_index[name];
-    const mask = rule.bonds.reduce((bits, bond, i) => selected.includes(bond) ? bits | (1 << i) : bits, 0);
+    const mask = rule.bonds.reduce((bits, bond, i) => (selected.includes(bond) || fixed.includes(bond)) ? bits | (1 << i) : bits, 0);
     return rule.excluded[mask];
   }
   function coreBanned(bond) {
-    return db.run.bannedBonds.includes(bond) && data.covenants.covenants.some(b => b.name === bond && b.bondType === "SEASON");
+    return effectiveBonds().includes(bond) && data.covenants.covenants.some(b => b.name === bond && b.bondType === "SEASON");
   }
   function availableHolders(bond) {
     return Object.values(rawOps).filter(op => !op.requiredStrategyId &&
@@ -184,10 +189,12 @@ const Workbench = (() => {
       (op.coreCovenants.includes(bond) || op.additionalCovenants.includes(bond))).length;
   }
   function banBondsDialog() {
+    const mode = data.multiplayer_bans[db.run.mode], fixed = fixedBonds();
     const group = (core, label) => `<fieldset class="training-enemies"><legend>${label}</legend><div>${data.covenants.covenants
-      .filter(b => (b.bondType === "SEASON") === core)
+      .filter(b => (b.bondType === "SEASON") === core && !fixed.includes(b.name))
       .map(b => `<label><input type="checkbox" name="ban-covenant" value="${esc(b.name)}" ${db.run.bannedBonds.includes(b.name) ? "checked" : ""}>${data.covenant_icons[b.name] ? `<img class="ban-icon" alt="" src="${esc(data.covenant_icons[b.name])}">` : ""}${esc(b.name)}</label>`).join("")}</div></fieldset>`;
-    popup(`<h2>本局置灰盟约</h2><p class="hint">对照游戏的「本局信息」，勾选灰色图标。只勾画面中已置灰的盟约。</p>${group(true,"核心盟约")}${group(false,"附加盟约")}
+    popup(`<h2>本局置灰盟约</h2><p class="hint">${mode ? esc(mode.name)+" · 本局随机置灰 "+mode.core+" 核心、"+mode.additional+" 附加。" : ""}对照游戏「本局信息」勾选灰色图标。三个阶段共用。干员有核心盟约时看核心，无核心时看附加；对应组全部置灰才会禁用该干员。</p>
+      ${fixed.length ? `<p class="hint">模式固定关闭 · ${esc(fixed.join("、"))}</p>` : ""}${group(true,"核心盟约")}${group(false,"附加盟约")}
       <details><summary id="ban-rule-total"></summary><p id="ban-rule-names"></p></details>
       <div class="actions">${act("ban-bonds-save","应用本局禁用","btn gold")}${button("cancel","取消","btn light")}</div>`);
     previewBans();
@@ -544,7 +551,7 @@ const Workbench = (() => {
     const r = db.run,
       boss = data.bosses.bosses.find((b) => b.name === r.boss),
       hp = boss?.hp.find((h) => h.mode === r.mode);
-    const modes = [
+    const modes = db.page==="planner" && db.planning?.kind==="auto" ? [...(!data.multiplayer_bans[r.mode] ? [["","选择多人难度"]] : []), ...Object.entries(data.multiplayer_bans).map(([id,m])=>[id,m.name])] : [
       ["mode_training_2", "入门协议"],
       ...data.bosses.bosses[0].hp.map((h) => [h.mode, h.name]),
     ];
@@ -561,7 +568,7 @@ const Workbench = (() => {
           ),
         )
         .join("")}</div>
-      ${Economy.view(r, data.economy, Workbench)}${section("本局禁用")}<div class="actions">${act("ban-bonds", "禁用盟约 · " + r.bannedBonds.length)}${act("ban-ops", "额外禁用干员 · " + r.banned.length)}</div><div class="tags controls">${[...r.bannedBonds, ...r.banned].map(tag).join("")}</div>
+      ${Economy.view(r, data.economy, Workbench)}${section("本局禁用")}<div class="actions">${act("ban-bonds", "禁用盟约 · " + effectiveBonds().length)}${act("ban-ops", "额外禁用干员 · " + r.banned.length)}</div><div class="tags controls">${[...effectiveBonds(), ...r.banned].map(tag).join("")}</div>
       ${section("敌方领袖与特训敌人")}<div class="filtergrid">${control("模式 / 规程等级", select("run-mode", modes, r.mode))}${control("敌方领袖", select("run-boss", [["", "未选择"], ...data.bosses.bosses.map((b) => b.name)], r.boss))}</div>
       <fieldset class="training-enemies"><legend>特训敌人（可多选）</legend>
         <div>${Object.entries(data.enemy_types.types).map(([code, type]) => `<label><input type="checkbox" name="training-enemy" value="${esc(code)}"${r.enemyTypes.includes(code) ? " checked" : ""}>${esc(type.typeName)}</label>`).join("")}</div>
@@ -595,9 +602,10 @@ const Workbench = (() => {
     const f = filterState(),
       p = db.prefs,
       r = db.run;
+    if (a.startsWith("income-")) { ItemIncome.click(a,v); return; }
     if (a === "money-use" || a === "price-auto") {
       if (a === "price-auto") r.upgrade = null;
-      else r.money = Economy.balance(v);
+      else ItemIncome.confirmBalance(r,v);
       persist();
       render();
       return;
@@ -805,6 +813,7 @@ const Workbench = (() => {
       return;
     }
     if (a.startsWith("map-")) return Maps.click(a, v);
+    if (a.startsWith("workshop-")) return Workshop.click(a.slice(9),v);
     if (a.startsWith("plan-")) return Planning.click(a, v);
     if (a.startsWith("team-")) return Teams.click(a, v);
   }
@@ -866,6 +875,7 @@ const Workbench = (() => {
             : Number(e.value)
           : e.value;
       Economy.changed(db.run, k);
+      if (k === "mode") Maps.bansChanged();
       if (k === "round" && db.prefs.autoStage) Teams.roundChanged();
       persist();
       render();
@@ -891,6 +901,7 @@ const Workbench = (() => {
     opChoices,
     isBanned,
     coreBanned,
+    effectiveBonds,
     availableHolders,
     head,
     applyTheme,

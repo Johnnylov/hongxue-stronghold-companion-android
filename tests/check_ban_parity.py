@@ -95,6 +95,7 @@ def run(assets):
         expect(page.locator("#desk h1")).to_have_text("攻略库")
         page.locator('[data-act="map"]').click()
         page.locator('[data-w="map-run-toggle"]').click()
+        page.locator("#run-mode").select_option("mode_multi_abyss")
         open_bans = page.locator('[data-w="ban-bonds"]')
         open_bans.click()
         dialog = page.locator("#dialog")

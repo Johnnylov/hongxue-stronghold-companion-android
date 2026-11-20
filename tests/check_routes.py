@@ -24,7 +24,8 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
         expect(page.locator("#desk h1")).to_have_text("攻略库")
         page.locator('[data-act="map"]').click()
         for board in maps["maps"]:
-            page.locator("#map-id").select_option(board["id"])
+            page.locator('[data-w="map-gallery"]').first.click()
+            page.locator('dialog[open] [data-w="map-select"]').filter(has_text=board["name"]).get_by_text(board["name"], exact=True).click()
             for i, route in enumerate(board["routes"]):
                 group = page.locator(f'[data-route-index="{i}"]')
                 expect(group.locator(".way-arrow")).to_have_count(len(route["cells"]) - 1)

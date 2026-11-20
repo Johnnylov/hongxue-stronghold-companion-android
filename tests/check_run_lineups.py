@@ -41,7 +41,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     first.get_by_text("跟踪到购买清单").click()
     expect(panel.locator("input[data-buy]:checked")).to_have_count(2)
     panel.get_by_label("蓝毒 已购买").check()
-    expect(panel.locator(".run-preview")).to_contain_text("3/3")
+    expect(panel.locator(".run-preview")).to_have_count(0)
     rec.click()
     expect(first).to_contain_text("干员已齐")
     first.get_by_text("跟踪到购买清单").click()
@@ -51,7 +51,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     page.evaluate("""() => {
         db.imports.unshift({id:'double', title:'双深靛', stages:[
             {label:'过渡',start:1,end:4,entries:[{key:'op:海沫'}]},
-            {label:'成型',start:5,end:16,isFinal:true,entries:[
+            {label:'成型',start:5,end:15,isFinal:true,entries:[
                 {key:'op:深靛',elite:true},{key:'op:深靛',elite:true},{key:'eq:聚合急救箱'}]}]});
         db.run.counts={'深靛':1}; db.run.elite={}; db.run.round=6; render();
     }""")
@@ -75,7 +75,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     expect(panel.get_by_label("极光 已购买")).to_be_checked()
 
     pool = ["砾", "初雪", "伊桑", "华法琳", "灵知", "耶拉", "角峰", "锏", "深靛"]
-    page.evaluate("names => {db.run.counts=Object.fromEntries(names.map(n=>[n,1])); persist()}", pool)
+    page.evaluate("names => {db.run.mode='mode_multi_abyss'; db.run.counts=Object.fromEntries(names.map(n=>[n,1])); persist()}", pool)
     page.locator('[data-act="map"]').click()
     page.locator('[data-w="map-tab"][data-v="recommend"]').click()
     members = page.locator("#desk .run-members > span")

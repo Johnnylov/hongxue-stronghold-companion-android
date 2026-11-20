@@ -11,7 +11,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 root = Path(__file__).resolve().parents[1]
-apk = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/Matou-Tablet-v1.0.4.apk"
+apk = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/Matou-Tablet-v1.0.5.apk"
 cases = json.loads((root / "tests/DesktopParity/reference.json").read_text(encoding="utf-8"))
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *args):
@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory() as tmp:
         print("All ten boards matched the desktop DLL, including notes, pins, copies and elite effects.", flush=True)
         case = cases[0]
         page.evaluate("""c => {
-            move('map');
+            db.run.mode='mode_multi_abyss'; move('map');
             Object.assign(db.board, {map:c.mapId, pool:c.names.map(name => ({name, count:1, elite:0})), layouts:{}});
             Maps.render();
         }""", case)

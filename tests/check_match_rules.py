@@ -29,7 +29,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     page.evaluate("""() => {
         delete db.promotionRulesMigrated;
         db.page = 'run';
-        db.run.money = 9999;
+        db.run.money = 9999; db.run.mode = 'mode_single_funny';
         db.run.counts = {'蓝毒':9,'星极':2};
         db.run.elite = {};
         const b = db.board;
@@ -49,7 +49,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     assert page.evaluate("JSON.parse(localStorage.getItem('hongxue.tablet.v1')).run.money") == 20
     assert page.evaluate("Array.from({length:9},(_,i)=>Economy.funding('mode_single_funny',i+1,Workbench.data.economy).amount)") == [6,7,8,9,10,11,11,11,11]
     assert page.evaluate("Array.from({length:14},(_,i)=>Economy.funding('mode_single_1',i+1,Workbench.data.economy).amount)") == [4,5,6,7,8,9,10,11,11,11,11,11,11,11]
-    assert page.evaluate("Economy.funding('mode_multi_abyss',12,Workbench.data.economy)") is None
+    assert page.evaluate("Economy.funding('mode_multi_abyss',12,Workbench.data.economy).amount") == 12
     assert page.evaluate("Economy.funding('mode_single_20',15,Workbench.data.economy).amount") == 11
     assert page.evaluate("Economy.funding('mode_single_20',16,Workbench.data.economy)") is None
     panel.locator(".round-funding summary").click()
@@ -76,13 +76,13 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
         panel.locator(f"#run-{field} + button").click()
         page.locator('#point-dialog').get_by_role('button', name=str(value), exact=True).click()
 
-    number("round", 15)
+    number("round", 14)
     number("terminal", 3)
     panel.locator("#run-boss").select_option(index=1)
     panel.locator('[name="training-enemy"]').nth(0).check()
     panel.locator('[name="training-enemy"]').nth(1).check()
     page.locator('[data-w="map-next-round"]').click()
-    assert page.evaluate("[db.run.round,db.run.terminal,!!db.run.boss,db.run.enemyTypes.length]") == [16, 3, True, 2]
+    assert page.evaluate("[db.run.round,db.run.terminal,!!db.run.boss,db.run.enemyTypes.length]") == [15, 3, True, 2]
     expect(page.locator('[data-w="map-next-round"]')).to_have_count(0)
     balance.nth(0).click()
     expect(balance.nth(0)).to_have_attribute("aria-pressed", "true")
@@ -113,7 +113,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     expect(panel).to_be_visible()
     expect(panel.locator('[name="training-enemy"]:checked')).to_have_count(2)
     expect(page.locator(".board")).to_be_visible()
-    assert page.evaluate("[db.run.round,db.run.money,db.run.upgrade,db.run.elite['蓝毒']]") == [16,5,4,3]
+    assert page.evaluate("[db.run.round,db.run.money,db.run.upgrade,db.run.elite['蓝毒']]") == [15,5,4,3]
     browser.close()
     server.shutdown()
 print("Passed inline match settings, legacy holdings, ordinary promotion, Astesia, bans, solver filtering and restart.")

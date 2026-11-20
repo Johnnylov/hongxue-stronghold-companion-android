@@ -1,7 +1,15 @@
 "use strict";
 const GuideModel = (() => {
   const base = "https://game.skland.com/arknights/stronghold-guide";
-  const maxRound = 16;
+  const maxRound = 15;
+  function limitRanges(guide) {
+    for (const s of guide.stages || []) {
+      if (s.start > maxRound) s.start=maxRound;
+      if (s.end > maxRound) s.end=maxRound;
+      if (s.start && s.end && /^回合 [0-9]+[–-][0-9]+$/.test(s.label)) s.label="回合 "+s.start+"–"+s.end;
+    }
+    return guide;
+  }
   function defaultRange(label) {
     const bounds = { 前期: [1, 5], 中期: [6, 10], 成型: [11, maxRound] }[label];
     return bounds
@@ -227,7 +235,7 @@ const GuideModel = (() => {
       strategyIds: guide.strategyIds || [],
       tags: strategies,
       blurb: guide.applicableScope || "",
-      stages,
+      stages:limitRanges({stages}).stages,
     };
   }
   function shoppingRows(stage) {
@@ -248,5 +256,6 @@ const GuideModel = (() => {
     defaultRange,
     stageText,
     maxRound,
+    limitRanges,
   };
 })();

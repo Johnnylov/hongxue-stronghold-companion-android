@@ -142,7 +142,7 @@ const RunLineups = (() => {
   }
 
   function targetPanel(held, people, calculate) {
-    const req = { people, banned: db.run.banned, bannedBonds: db.run.bannedBonds, custom: db.prefs.custom, transforms: 0 };
+    const req = { people, banned: db.run.banned, bannedBonds: W.effectiveBonds(), custom: db.prefs.custom, transforms: 0 };
     const key = JSON.stringify([req, held]);
     if (target?.key !== key) {
       targetWorker.stop();
@@ -161,10 +161,11 @@ const RunLineups = (() => {
       }).finally(() => {
         if (target !== job) return;
         targetWorker.stop();
-        for (const el of document.querySelectorAll("[data-run-target]")) el.innerHTML = job.html;
+        const html = job.guide && alreadyListed(job.guide,held) ? "" : job.html;
+        for (const el of document.querySelectorAll("[data-run-target]")) el.innerHTML = html;
       });
     }
-    return target.html || button("compute-run-target", "按持有干员另算一套", "btn light");
+    return target.guide && alreadyListed(target.guide,held) ? "" : target.html || button("compute-run-target", "按持有干员另算一套", "btn light");
   }
 
   async function buildTarget(req, held) {
@@ -209,6 +210,7 @@ const RunLineups = (() => {
   function preview() {
     const best = matches(roster())[0];
     if (!best) return "";
+    if (Teams.tracked().some(t=>t.id===best.guide.id || sameStages(t,best.guide))) return "";
     return `<button class="run-preview" data-act="basket-tab" data-tab="recommend"><span>本局推荐 ›</span>
       <strong>${esc(best.guide.title)}</strong><small>本阶段已持有 ${best.have}/${best.size}</small></button>`;
   }
@@ -233,26 +235,40 @@ const RunLineups = (() => {
       `<div data-run-target>${targetPanel(held, people, !cards.length)}</div>`;
   }
 
-  function follow(origin, id, index) {
-    const guide = origin === "computed" ? target?.guide : (origin === "team" ? db.teams : sources()).find(g => g.id === id);
-    if (!guide?.stages[index]) return;
-    const tokens = new Set(origin === "team" ? guide.owned.filter(t => JSON.parse(t)[0].startsWith("eq:")) : []);
+  function sameStages(a,b) {
+    function key(t) {
+      return JSON.stringify(t.stages.map(s=>[s.start ?? null,s.end ?? null,!!s.isFinal,
+        s.entries.map(e=>JSON.stringify([e.key,!!e.elite,e.equipment || [],e.transformedCovenant || ""])).sort()]));
+    }
+    return key(a)===key(b);
+  }
+  function alreadyListed(guide, held) {
+    const sig = signature(QuickRoster.fromStage(guide.stages[0]));
+    return matches(held).some(c=>c.signature===sig+"|"+sig);
+  }
+  function ownedTokens(guide) {
+    const tokens = new Set();
     for (const stage of guide.stages) {
       for (const row of GuideModel.shoppingRows(stage)) {
         const [key, copy] = JSON.parse(row.token);
         if (key.startsWith("op:") && db.run.counts[key.slice(3)] >= copy) tokens.add(row.token);
       }
     }
+    return [...tokens];
+  }
+  function follow(origin, id, index) {
+    const guide = origin === "computed" ? target?.guide : (origin === "team" ? db.teams : sources()).find(g => g.id === id);
+    if (!guide?.stages[index]) return;
+    const previous = origin === "team" ? guide : [active(),...db.teams].find(t=>t && sameStages(t,guide));
     db.prefs.basketTab = "shop";
     const destination = db.page === "map" ? "map" : "teams";
     if (destination === "map") db.board.tab = "board";
-    if (origin === "team") {
-      guide.owned = [...tokens];
-      guide.stage = index;
-      db.active = guide.id;
-      move(destination, destination === "teams" ? guide.id : null);
-    } else incorporate(guide, index, [...tokens], destination);
+    if (previous) {
+      previous.stage = index;
+      db.active = previous.id;
+      move(destination, destination === "teams" ? previous.id : null);
+    } else incorporate(guide, index, ownedTokens(guide), destination);
   }
   function bestMatch() { return matches(roster())[0] || null; }
-  return { view, follow, preview, retryField, computeTarget, bestMatch };
+  return { view, follow, preview, retryField, computeTarget, bestMatch, ownedTokens };
 })();

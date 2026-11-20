@@ -16,7 +16,32 @@ const Maps = (() => {
       D: "防守点",
       S: "出怪点",
     };
+  function workshopStage() {
+    const ref=db.workshopMap;
+    return db.page==="map" && ref && db.teams.find(t=>t.id===ref.teamId)?.stages[ref.index];
+  }
+  function openWorkshop(t) {
+    const index=stageNum(t), stage=t.stages[index];
+    const pool=QuickRoster.fromStage({entries:stage.entries.filter(e=>!e.reserve)})
+      .filter(p=>W.profiles[p.name]?.normalRange?.base && !W.isBanned(p.name));
+    if (!pool.length) {toast("本阶段没有可部署干员");return;}
+    const board=(stage.workshopBoard ||= {map:db.board?.map || W.data.garrison_maps.maps[0].id,
+      mode:1,people:db.planning.people || 8,source:"trial",tab:"board",routes:true,pool:[],layouts:{}});
+    cancelCalculation(false);
+    const changed=JSON.stringify(board.pool)!==JSON.stringify(pool);
+    board.pool=pool;
+    db.workshopMap={teamId:t.id,index};
+    selected=""; inspecting=false;
+    move("map");
+    if(changed) {prune();board.needsSolve=true;persist();render();}
+    showInitial();
+  }
+  function leaveWorkshop() {
+    cancelCalculation(false);
+    db.workshopMap=null; selected=""; inspecting=false;
+  }
   function base() {
+    if(workshopStage()) return workshopStage().workshopBoard;
     const m = (db.board ||= {
       map: W.data.garrison_maps.maps[0].id,
       people: 8,
@@ -117,6 +142,11 @@ const Maps = (() => {
     base().needsSolve = true;
   }
   function restoreRosterSource() {
+    if (!db.modeBansMigrated) {
+      if (db.board && W.data.multiplayer_bans[db.run.mode]?.inactive.length) bansChanged();
+      db.modeBansMigrated=true;
+      persist();
+    }
     if (!db.promotionRulesMigrated) {
       for (const name of Object.keys(db.run.counts)) QuickRoster.normalizeOwned(name);
       if (db.board) {
@@ -171,6 +201,78 @@ const Maps = (() => {
     }
     sh.placed[key] = { ...old, cell: { col, row }, facing: old?.facing || 0 };
     invalidate();
+  }
+  function deployOne(p) {
+    const sh=sheet(), map=current(), m=base();
+    if (sh.placed[p.key]) {
+      selected=""; inspecting=false; delete sh.placed[p.key];
+      sh.pins=sh.pins.filter(key=>key!==p.key);
+      sh.manual=true; invalidate(); return;
+    }
+    if (Object.keys(sh.placed).length>=m.people) { toast("上场已满，先点场上一名干员的 ✓ 下场"); return; }
+    const taken=new Set(Object.values(sh.placed).map(v=>v.cell.col+","+v.cell.row));
+    const available=(c,r)=>!taken.has(c+","+r) && legal(p.key,c,r);
+    const previous=sh.recommended?.placed[p.key]?.cell;
+    let cell=previous && available(previous.col,previous.row) ? previous : null;
+    if (!cell) {
+      const tiles=[], left=W.data.garrison_maps.columns[0];
+      const lanes=map.routes.flatMap(route=>route.cells);
+      const melee=W.profiles[p.name]?.position==="近战";
+      map.cells.forEach((line,row)=>Array.from(line).forEach((type,i)=>{
+        const col=left+i;
+        if (!available(col,row)) return;
+        const distance=Math.min(...lanes.map(([x,y])=>Math.abs(col-x)+Math.abs(row-y)));
+        tiles.push({col,row,cost:distance + (!melee && type!=="H" ? 2 : 0)});
+      }));
+      tiles.sort((a,b)=>a.cost-b.cost || a.col-b.col || a.row-b.row);
+      cell=tiles[0];
+    }
+    if (!cell) {toast("没有可用地块");return;}
+    selected=""; inspecting=false; moveTo(p.key,cell.col,cell.row);
+  }
+  function editCard(action,key) {
+    const m=base(), pool=candidates(), card=pool.find(p=>p.key===key);
+    if(!card) return;
+    if(action==="field") {deployOne(card);return;}
+    if(workshopStage()) return;
+    const unit=m.pool.find(u=>u.name===card.name);
+    if(!unit) return;
+    const rows=pool.filter(p=>p.name===unit.name);
+    const oldKeys=new Set(rows.map(p=>p.key));
+    const size=QuickRoster.mergeSize(unit.name);
+    const ordinary=rows.filter(p=>!p.isElite);
+    if(action==="copy") {
+      if(ordinary.length===size-1) {
+        const sh=sheet();
+        const priority=p=>Number(sh.pins.includes(p.key))*4+Number(!!sh.placed[p.key])*2+Number(p.key===key);
+        ordinary.sort((a,b)=>priority(b)-priority(a));
+        ordinary[0].isElite=true;
+        for(const consumed of ordinary.slice(1)) rows.splice(rows.indexOf(consumed),1);
+      } else rows.push({name:card.name,isElite:false});
+    } else if(action==="remove") rows.splice(rows.indexOf(card),1);
+    else if(action==="elite") {
+      if(card.isElite && ordinary.length>=size-1) {toast("普通份数已达合成阈值");return;}
+      card.isElite=!card.isElite;
+    } else return;
+    // Map copy keys put elites first. Keep each surviving piece's cell, facing and pin when its number changes.
+    rows.sort((a,b)=>Number(b.isElite)-Number(a.isElite));
+    const renamed=new Map();
+    rows.forEach((p,i)=>{if(p.key) renamed.set(p.key,i?card.name+"#"+(i+1):card.name);});
+    for(const layout of Object.values(m.layouts)) {
+      const placed={};
+      for (const [k,value] of Object.entries(layout.placed)) {
+        const next=oldKeys.has(k)?renamed.get(k):k;
+        if(next) placed[next]=value;
+      }
+      layout.placed=placed;
+      layout.pins=layout.pins.map(k=>oldKeys.has(k)?renamed.get(k):k).filter(Boolean);
+      layout.recommended=null;
+    }
+    unit.count=rows.length; unit.elite=rows.filter(p=>p.isElite).length;
+    if (!unit.count) m.pool=m.pool.filter(u=>u!==unit);
+    if(oldKeys.has(selected)) selected=renamed.get(selected) || "";
+    inspecting=false;
+    sync(false);
   }
   function invalidate() {
     sheet().total = null;
@@ -309,7 +411,7 @@ const Maps = (() => {
     const selectedPiece = sh.placed[selected];
     const roles = ["输出", "承伤", "辅助", "叠层"];
     const sub = m.tab || "board";
-    const tabs = `<div class="tracking-tabs">${[
+    const tabs = workshopStage() ? W.act("map-workshop-back","‹ 返回阵容推演 · "+workshopStage().label,"btn light") : `<div class="tracking-tabs">${[
       ["shop", "购买清单"],
       ["recommend", "推荐阵容"],
       ["board", "干员与地图"],
@@ -407,7 +509,7 @@ const Maps = (() => {
     function card(p) {
       const piece = sh.placed[p.key],
         role = piece?.role;
-      return `<button class="deploy-card role-${role ?? "bench"} ${selected === p.key ? "active-unit" : ""}" draggable="true" data-piece="${esc(p.key)}" data-w="map-piece" data-v="${esc(p.key)}">${portrait("op:" + p.name)}<span class="deploy-name"><strong>${esc(p.key)}${p.isElite ? " · 精" : ""}</strong><small>${esc(info("op:" + p.name).tags.join(" · "))}</small></span>${piece && sh.pins.includes(p.key) ? "<i aria-label='已固定'>●</i>" : ""}<span class="role-label">${roles[role] || "备选"}</span></button>`;
+      return `<div class="map-unit-card"><button class="deploy-card role-${role ?? "bench"} ${selected === p.key ? "active-unit" : ""}" draggable="true" data-piece="${esc(p.key)}" data-w="map-piece" data-v="${esc(p.key)}">${portrait("op:" + p.name)}<span class="deploy-name"><strong>${esc(p.key)}${p.isElite ? " · 精" : ""}</strong><small>${esc(info("op:" + p.name).tags.join(" · "))}</small></span>${piece && sh.pins.includes(p.key) ? "<i aria-label='已固定'>●</i>" : ""}<span class="role-label">${roles[role] || "备选"}</span></button>${QuickRoster.cardActions("map",p.key,p.key,p.isElite,!!piece,!workshopStage())}</div>`;
     }
     const axisCols = Array.from(
       { length: bounds.right - bounds.left + 1 },
@@ -438,25 +540,26 @@ const Maps = (() => {
         : ""
     }</div>`;
     desk.innerHTML = `<div class="deploy-layout">${tabs}
-      <section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
+      ${workshopStage() ? "" : `<section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
       <span>第 ${db.run.round} 回合 · 终端 ${db.run.terminal} 级${db.run.money == null ? "" : " · 资金 " + esc(db.run.money)}</span>
       ${db.run.round < GuideModel.maxRound ? W.act("map-next-round","下一回合","linkbtn") : ""}</div>
       <div id="map-run-panel" ${db.prefs.mapRunOpen ? "" : "hidden"}>${db.prefs.mapRunOpen ? W.runPanel() : ""}</div></section>
-      <div id="map-next-step">${NextStep.view()}</div>
-      <div class="map-head"><img alt="" src="img/${esc(map.id)}.webp"><div><strong>${esc(map.name)}</strong> <span>● 手动</span><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small></div><label class="map-change" aria-label="切换地图">⇄${W.select(
+      <div id="map-next-step">${NextStep.view()}</div>`}
+      <div class="map-head map-preview-head"><button class="map-photo" type="button" data-w="map-zoom" aria-label="放大${esc(map.name)}"><img alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp"></button><div><strong>${esc(map.name)}</strong><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small><div class="actions">${W.act("map-gallery","看图选地图","btn light")}${W.act("map-zoom","放大","linkbtn")}</div></div><span hidden>${W.select(
       "map-id",
       W.data.garrison_maps.maps.map((z) => [z.id, z.name]),
       m.map,
-    )}</label></div>
+    )}</span></div>
       <div class="deploy-modes"><div class="tracking-tabs">${["战斗", "平衡", "叠层"].map((n, i) => W.act("map-mode-set", n, m.mode === i ? "chosen" : "", "" + i)).join("")}</div><div class="tracking-tabs">${[8, 9].map((i) => W.act("map-count-set", i, m.people === i ? "chosen" : "", "" + i)).join("")}</div></div>
-      <div class="bench-head roster-bar"><strong>${m.source === "owned" ? "本局持有" : "阵容试摆"} · ${m.pool.length} 名</strong><span>共 ${pool.length} 份 · 精锐 ${pool.filter(p=>p.isElite).length} 份</span>${W.act("map-pool","快调干员","btn light")}</div>
+      <div class="bench-head roster-bar"><strong>${workshopStage() ? "本阶段上场" : m.source === "owned" ? "本局持有" : "阵容试摆"} · ${m.pool.length} 名</strong><span>共 ${pool.length} 份 · 精锐 ${pool.filter(p=>p.isElite).length} 份</span>${workshopStage() ? "" : W.act("map-pool","快调干员","btn light")}</div>
       <article class="board-panel"><div class="board-shell"><div class="board-cols">${axisCols}</div><div class="board-rows">${axisRows}</div><div class="board">${grid}${m.routes ? routeLayer(map, min, m.filter || "both") : ""}</div></div>
       <div class="plan-checks" aria-label="站位校验" aria-live="polite">${flags || `<span class="hint">${busy ? "正在计算站位校验…" : m.needsSolve ? "持有数量已更新，可继续调整或重新推荐站位。" : count ? "正在评估当前摆位…" : "选择干员并推荐站位后，显示盟约、上下路阻挡与治疗。"}</span>`}</div></article>
-      ${selected ? `<div class="selected-piece"><strong>${esc(selected)}${roles[selectedPiece?.role] ? " · " + roles[selectedPiece.role] : ""}</strong>${inspecting && selectedCandidate ? QuickRoster.numbers(m.pool.find(p=>p.name === selectedCandidate.name),"map-number") : ""}<div class="actions">${inspecting && selectedPiece ? W.act("map-arm-move","移动 / 换位") : ""}${selectedPiece ? W.act("map-turn", "转向 " + faces[selectedPiece.facing]) + W.act("map-pin", sh.pins.includes(selected) ? "解除固定" : "固定位置") + W.act("map-bench", "下场") : "<small>点一个可用格子部署</small>"}${m.needsSolve ? W.act("map-finish-edit", "完成并推荐站位", "btn gold") : ""}${W.act("map-deselect", "收起", "linkbtn")}</div>${!m.needsSolve && selectedPiece?.notes ? `<p class="hint">${esc(selectedPiece.notes.join(" · "))}</p>` : ""}</div>` : ""}
+      ${selected ? `<div class="selected-piece"><strong>${esc(selected)}${roles[selectedPiece?.role] ? " · " + roles[selectedPiece.role] : ""}</strong>${inspecting && selectedCandidate && !workshopStage() ? QuickRoster.numbers(m.pool.find(p=>p.name === selectedCandidate.name),"map-number") : ""}<div class="actions">${inspecting && selectedPiece ? W.act("map-arm-move","移动 / 换位") : ""}${selectedPiece ? W.act("map-turn", "转向 " + faces[selectedPiece.facing]) + W.act("map-pin", sh.pins.includes(selected) ? "解除固定" : "固定位置") + W.act("map-bench", "下场") : "<small>点一个可用格子部署</small>"}${m.needsSolve ? W.act("map-finish-edit", "完成并推荐站位", "btn gold") : ""}${W.act("map-deselect", "收起", "linkbtn")}</div>${!m.needsSolve && selectedPiece?.notes ? `<p class="hint">${esc(selectedPiece.notes.join(" · "))}</p>` : ""}</div>` : ""}
+      ${pool.length ? `<p class="unit-key">${workshopStage()?"✓ 上场 / 下场":"＋1 收入整备区　精 标记精锐　✓ 上场 / 下场　× 删这一份"}</p>`:""}
       ${field.length ? `<div class="deploy-roster">${field.map(card).join("")}</div>` : ""}
-      <div class="bench-head"><strong>整备区 · ${bench.length} 人</strong><span>上场 ${count} · 已获取 ${new Set(pool.map((p) => p.name)).size} 名</span>${W.act("map-pool", "干员池 ›", "linkbtn")}</div>
+      <div class="bench-head"><strong>整备区 · ${bench.length} 人</strong><span>上场 ${count} · 已获取 ${new Set(pool.map((p) => p.name)).size} 名</span>${workshopStage() ? "" : W.act("map-pool", "干员池 ›", "linkbtn")}</div>
       ${bench.length ? `<div class="deploy-roster">${bench.map(card).join("")}</div>` : ""}
-      <div class="deploy-tools actions">${W.act("map-solve", busy ? status : m.needsSolve && count ? "更新推荐站位" : "推荐站位", "btn gold")}${busy ? W.act("map-cancel", "取消计算", "linkbtn") : ""}${W.act("map-team", "使用当前阵容")}${W.act("map-owned", "使用实际拥有池")}${W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
+      <div class="deploy-tools actions">${W.act("map-solve", busy ? status : m.needsSolve && count ? "更新推荐站位" : "推荐站位", "btn gold")}${busy ? W.act("map-cancel", "取消计算", "linkbtn") : ""}${workshopStage() ? "" : W.act("map-team", "使用当前阵容")+W.act("map-owned", "使用实际拥有池")+W.act("map-counts", "数量与精锐")}${W.act("map-evaluate", "评估当前摆位", "linkbtn")}</div>
       ${legend}${sh.manual && sh.recommended && sh.total !== null ? `<div class="actions"><p class="hint">手动摆位 · 较推荐 ${Math.round((sh.total - sh.recommended.total) * 10) / 10}</p>${W.act("map-restore", "恢复推荐站位", "linkbtn")}</div>` : ""}</div>`;
     const cols = bounds.right - bounds.left + 1;
     desk
@@ -467,6 +570,20 @@ const Maps = (() => {
       .style.setProperty("--rows", String(bounds.rows));
   }
   async function click(a, v) {
+    if(a.startsWith("map-card-")) {editCard(a.slice(9),v);return;}
+    if (a==="map-workshop-back") { move("planner"); return; }
+    if (a === "map-zoom") {
+      const map=current();
+      popup(`<h2>${esc(map.name)}</h2><img class="map-expanded" alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp">${W.act("map-gallery","看图选地图","btn light")}`);
+      return;
+    }
+    if (a === "map-gallery") {
+      popup(`<h2>选择地图</h2><div class="map-gallery">${W.data.garrison_maps.maps.map(z=>`<button data-w="map-select" data-v="${esc(z.id)}" aria-pressed="${z.id===base().map}"><img src="img/${esc(z.id)}.webp" alt=""><strong>${esc(z.name)}</strong></button>`).join("")}</div>`);
+      return;
+    }
+    if (a === "map-select") {
+      close(); const el=$("map-id"); el.value=v; el.dispatchEvent(new Event("change",{bubbles:true})); return;
+    }
     if (a === "map-run-toggle") {
       db.prefs.mapRunOpen = !db.prefs.mapRunOpen;
       persist(); render();
@@ -656,5 +773,5 @@ const Maps = (() => {
     selected = k;
     moveTo(k, ...tile.dataset.v.split(",").map(Number));
   });
-  return { render, click, candidates, ownedChanged, showInitial, savedField, waitingForRoster, restoreRosterSource, bansChanged };
+  return { render, click, openWorkshop, leaveWorkshop, candidates, ownedChanged, showInitial, savedField, waitingForRoster, restoreRosterSource, bansChanged };
 })();
