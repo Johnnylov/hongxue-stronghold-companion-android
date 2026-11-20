@@ -87,9 +87,9 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     page.locator("dialog[open] .icon-close").click()
     action("map-workshop-back").click()
     assert page.evaluate("JSON.stringify(db.board)")==board
-    action("workshop-stage","1").click()
+    page.locator("#ws-stage").select_option("1")
     expect(page.locator(".ws-piece")).to_have_count(0)
-    action("workshop-stage","0").click()
+    page.locator("#ws-stage").select_option("0")
     expect(page.locator(".ws-piece")).to_have_count(3)
     library.locator('[data-w="ban-bonds"]').click()
     page.locator('dialog[open] input[value="伊比利亚"]').check()
@@ -101,6 +101,17 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     for width in [1400,820,412]:
         page.set_viewport_size({"width":width,"height":840})
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), width
+    page.set_viewport_size({"width":1400,"height":880})
+    page.locator('[data-act="teams"]').click()
+    page.locator('#desk [data-act="open-team"]').first.click()
+    stage=page.locator("#detail-stage")
+    assert stage.locator("option").all_text_contents()==["前期 · 第 1–5 回合","中期 · 第 6–10 回合","后期成型 · 第 11–15 回合"]
+    stage.select_option("1")
+    expect(page.locator("#basketStage")).to_have_value("1")
+    page.locator("#basketStage").select_option("2")
+    expect(stage).to_have_value("2")
+    page.reload()
+    expect(stage).to_have_value("2")
     page.locator('[data-act="map"]').click()
     page.locator('[data-w="map-pool"]').first.click()
     card=page.locator('.quick-card[data-unit="角峰"]')

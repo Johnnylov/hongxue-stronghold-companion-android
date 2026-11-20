@@ -56,7 +56,7 @@ const PlanMatch = (() => {
     const here = targets.filter(n=>Planning.recruitment(n,terminal).canRoll === true);
     const opens = missing.filter(n=>Planning.recruitment(n,terminal).canRoll !== true && Planning.recruitment(n,next).canRoll === true);
     const affordable = here.find(n=>money == null || price(n)<=money);
-    const funding = money == null ? "余额待点选" : "当前余额 " + money;
+    const funding = money == null ? "余额待点选" : (req.estimated?"估算余额 ":"当前余额 ") + money;
     const costText = terminal === 6 ? "终端已满级" : upgrade == null ? "升级价待确认" :
       money == null ? "升本需 " + upgrade : money < upgrade ? "升本还差 " + (upgrade-money) : "升本后余 " + (money-upgrade);
     const budget = funding + " · " + costText + "。";
@@ -83,7 +83,7 @@ const PlanMatch = (() => {
   function summary(plan,req,level,first=true) {
     let [action,reason] = turn(plan,req);
     if (level) {
-      const budget=req.money==null?"余额待确认":"当前余额 "+req.money;
+      const budget=req.money==null?"余额待确认":(req.estimated?"估算余额 ":"当前余额 ")+req.money;
       const buy=(level.keyCards || []).find(n=>!W.isBanned(n) && Planning.recruitment(n,req.terminal).canRoll===true && (req.money==null || price(n)<=req.money));
       if(req.money===0 && req.upgrade!==0) action="本轮先调站位";
       else if (req.terminal<6 && req.upgrade===0) action="可免费升至 "+(req.terminal+1)+" 本";

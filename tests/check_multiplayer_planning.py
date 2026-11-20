@@ -66,7 +66,7 @@ with ThreadingHTTPServer(("127.0.0.1",0),functools.partial(Handler,directory=str
     assert page.evaluate("Workbench.isBanned('砾')") is False
     page.locator('[data-w="plan-run-settings"]').click()
     def set_money(n):
-        page.get_by_role("group",name="本局资金").get_by_role("button",name=str(n),exact=True).click()
+        page.locator("#run-money").select_option(str(n))
     set_money(0)
     expect(panel).to_contain_text("本轮先调站位")
     calls=page.evaluate("requests.length")

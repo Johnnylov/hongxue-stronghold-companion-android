@@ -106,15 +106,52 @@ const NextStep = (() => {
     if (!entries.length) return card("先选本阶段干员", "当前阶段没有干员目标。"+cashHint(), more);
     return card("本阶段干员已齐，核对上场与站位", `「${guide.title}」${stage.label || ""}的数量和精锐要求均已满足。${cashHint(true)}`, action);
   }
+  function routeResult(title,route,advice,final=false) {
+    const preview=!final && db.run.terminal<route.stages[0].definition.terminalLevel;
+    let opening="";
+    if(preview) {
+      const cost=Economy.price(db.run,W.data.economy);
+      const amount=db.run.money;
+      const budget=cost==null?"升级价待确认":`升到 2 本需 ${cost} 资金`+(amount==null?"":amount<cost?`，还差 ${cost-amount}`:`，升后余 ${amount-cost}`);
+      const early=route.stages[0].operators.filter(o=>Planning.recruitment(o.name).canRoll===true && !db.run.counts[o.name]);
+      opening=`<p class="route-opening"><b>当前 1 本</b>　${early.length?"遇到"+esc(early.map(o=>o.name).join("、"))+"可先拿。":"先用现有一阶干员过渡。"}${esc(budget)}。</p>`;
+    }
+    return `<p class="route-source">${esc(title)}</p>`+opening+Planning.routePanel(route,advice,db.run.terminal,final);
+  }
+  function cachedAdvice(owner,key,load,onError) {
+    if(adviceJob && adviceJob.owner===owner && adviceJob.key===key) return adviceJob.html;
+    const job=adviceJob={owner,key,html:'<p role="status">正在计算本局路线…</p>'};
+    setTimeout(async()=>{
+      if(job!==adviceJob) return;
+      if(db.page!=="map") {adviceJob=null;return;}
+      try {job.html=await load();}
+      catch {job.html=onError()+'<p>路线暂未算出。</p>'+W.act("next-retry","重新计算","linkbtn");}
+      if(job!==adviceJob) return;
+      for(const el of document.querySelectorAll("[data-next-route]")) el.innerHTML=job.html;
+    },180);
+    return job.html;
+  }
+  function liveAdvice(team,held) {
+    const req=Planning.payload("auto");
+    const cores=W.data.covenants.covenants.filter(c=>c.bondType==="SEASON").map(c=>c.name);
+    const preferred=team && (team.autoPlan?.candidate?.mainCovenant || Object.keys(team.goals || {}).find(n=>cores.includes(n)) ||
+      (team.tags || []).find(n=>cores.includes(n)) || cores.find(n=>team.title.includes(n)));
+    const key=JSON.stringify([req.round,req.terminal,req.money,req.estimated,req.upgrade,req.modeId,req.people,req.strategy,req.mechElite,
+      req.owned,req.preferred,req.banned,req.bannedBonds,req.custom,preferred]);
+    return cachedAdvice(team,key,async()=>{
+      const result=await Planning.matchRoute(req,preferred);
+      return routeResult((held.length?"本局推荐 · ":"通用路线 · ")+result.title,result.route,result.advice);
+    },()=>fallback(held,team));
+  }
   function savedAdvice(team, held) {
     const archive = team.autoPlan, route = archive.savedRoute;
     const rosterChanged = team.stages.length !== route.stages.length || route.stages.some((s,i)=>{
-      const entries = team.stages[i].entries.filter(e=>e.key.startsWith("op:"));
-      return entries.length !== s.operators.length || entries.some((e,j)=>e.key !== "op:"+s.operators[j].name || e.elite);
+      const names=team.stages[i].entries.filter(e=>e.key.startsWith("op:") && !e.reserve).map(e=>e.key.slice(3)).sort();
+      const planned=s.operators.map(o=>o.name).sort();
+      return names.length!==planned.length || names.some((n,j)=>n!==planned[j]);
     });
     if (rosterChanged) {
-      adviceJob = null;
-      return fallback(held, team) + '<p class="hint">阵容已修改，按当前阶段核对购买需求。</p>';
+      return liveAdvice(team,held);
     }
     const blocked = [...new Set(route.stages.flatMap(s=>s.operators.map(o=>o.name)))].filter(unavailable);
     if (W.coreBanned(archive.candidate.mainCovenant) || blocked.length) {
@@ -124,49 +161,33 @@ const NextStep = (() => {
     const req = {...W.request(), ...archive, owned:held.map(u=>u.name)};
     const final = team.stages[stageNum(team)]?.isFinal === true;
     const key = JSON.stringify([db.run.terminal,db.run.round,req.money,req.upgrade,req.owned,final]);
-    if (adviceJob?.archive === archive && adviceJob.key === key) return adviceJob.html;
-    const job = adviceJob = {archive, key, html:card("正在读取本局路线建议",cashHint())};
-    // Yield until the current tap is painted. A newer render replaces this job.
-    setTimeout(async () => {
-      if (job !== adviceJob) return;
-      try {
-        const advice = await W.engine("advice", req);
-        if (job !== adviceJob) return;
-        const levels = advice.flatMap(stage=>stage.levels || []);
-        const level = levels.find(l=>l.terminalLevel === (final ? 0 : req.terminal));
-        if (!level) job.html = fallback(held, team);
-        else {
-          const priorities = (level.keyCards || []).filter(n=>!W.isBanned(n));
-          const first = priorities[0], reserve = level.reserve?.[0];
-          const heading = first ? (req.money === 0 ? "本轮余额已用完 · 待补" : "商店遇到时优先拿") + first : level.focus;
-          const budget = final ? cashHint() : level.economyText;
-          job.html = card(heading, [first && level.focus, level.upgradeText, budget,
-            reserve && `有余钱时可留${reserve.name}，${reserve.neededAt}用。`].filter(Boolean).join(" ")) +
-            (level.purchaseText ? `<details><summary>本级购买顺序</summary><p>${esc(level.purchaseText).replaceAll("\n","<br>")}</p></details>` : "");
-        }
-      } catch {
-        if (job !== adviceJob) return;
-        job.html = fallback(held,team);
-      }
-      for (const el of document.querySelectorAll("[data-next-route]")) el.innerHTML = job.html;
-    }, 60);
-    return job.html;
+    return cachedAdvice(archive,key,async()=>{
+      const advice=await W.engine("advice",req);
+      return routeResult("跟踪路线 · "+team.title,route,advice,final);
+    },()=>fallback(held,team));
   }
   function view() {
-    const held = QuickRoster.owned().filter(u=>!W.isBanned(u.name)), team = active();
-    let body;
-    if (held.length && team?.autoPlan?.candidate && team.autoPlan.savedRoute?.stages?.length) {
-      body = `<div data-next-route>${savedAdvice(team,held)}</div>`;
-    } else {
-      adviceJob = null;
-      body = held.length ? fallback(held,team) : card(`当前 ${db.run.terminal} 本 · 先看本级商店`,
-        levelTip(db.run.terminal) + "点「快调干员」记录已有干员，可查看具体补牌和精锐建议。",
-        W.act("owned","快调干员","linkbtn"));
-    }
-    const close = pairs(held);
-    const promotion = close.length ? `<p class="hint">精锐机会 · ${esc(close.slice(0,3).map(u=>u.name).join("、"))}再各拿 1 名普通即可合成精锐。</p>` : "";
-    return `<section class="next-step"><h3>下一步做什么</h3>${body}${promotion}${held.length ? `<p class="hint">本级通用 · ${esc(levelTip(db.run.terminal))}</p>` : ""}</section>`;
+    const held=PlanMatch.holdings(), team=active();
+    const saved=team?.autoPlan?.candidate && team.autoPlan.savedRoute?.stages?.length;
+    const html=saved?savedAdvice(team,held):liveAdvice(team,held);
+    // Guide shopping and desktop-generated routes may have different members. Keep their identities visible.
+    const shopping=!saved && team && held.length
+      ? `<details class="next-shopping"><summary>已跟踪清单 · ${esc(team.title)}</summary>${fallback(held,team)}</details>`:"";
+    const match=!team && held.length && RunLineups.bestMatch();
+    const follow=match?button("follow-run-lineup","跟踪攻略 · "+match.guide.title,"linkbtn",
+      attr("origin",match.origin)+" "+attr("id",match.guide.id)+" "+attr("index",match.index)):"";
+    const close=pairs(held);
+    return `<details class="next-step" id="next-step-panel" ${db.prefs.mapAdviceOpen===false?"":"open"}><summary><b>下一步做什么</b> · 当前 ${db.run.terminal} 本</summary><div class="next-heading">${W.act("owned","调整持有","linkbtn")}</div>
+      <div data-next-route>${html}</div>${close.length?`<p>再拿一份可合精锐 · ${esc(close.map(u=>u.name).join("、"))}</p>`:""}${shopping}${follow}</details>`;
   }
+  document.addEventListener("toggle",e=>{
+    const panel=e.target;
+    if(panel.id!=="next-step-panel" || !panel.isConnected || panel.open===(db.prefs.mapAdviceOpen!==false)) return;
+    db.prefs.mapAdviceOpen=panel.open;
+    persist();
+  },true);
+  function retry() {adviceJob=null;Maps.render();}
+
   function progression() {
     const byLevel = Array.from({length:6},()=>new Set());
     for (const t of Teams.tracked()) {
@@ -190,5 +211,5 @@ const NextStep = (() => {
     }).join("");
     return `<details class="plan-progression"><summary>各本怎么走</summary><ol>${rows}</ol></details>`;
   }
-  return {view, progression};
+  return {view, progression, retry};
 })();

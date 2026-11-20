@@ -22,8 +22,8 @@ const Planning = (() => {
       mechElite: false,
     });
   }
-  function payload() {
-    const req = { ...W.request(), ...state() };
+  function payload(kind=state().kind) {
+    const req = { ...W.request(), ...state(), kind };
     if (req.kind === "auto") {
       const held = PlanMatch.holdings();
       req.people ||= 8;
@@ -84,12 +84,52 @@ const Planning = (() => {
     const advice=await W.engine("advice",{...shop,savedRoute:result.route});
     return {...result,advice};
   }
-  function levelCard(level) {
+  async function matchRoute(req, preferredCore) {
+    const result=await autoSearch(req);
+    const ranked=PlanMatch.rank(result.candidates || [],req);
+    const selected=ranked.find(r=>r.candidate.mainCovenant===preferredCore) || ranked[0];
+    if (!selected) throw Error(result.error || "当前禁用条件下没有候选阵容");
+    const c=selected.candidate, style=c.recommendedStyle || 0;
+    const response=await automaticRoute(c,style,req,selected.index);
+    return {route:response.route,advice:response.advice,title:c.mainCovenant+" · "+(style===0?"先小后大":"先大后小")};
+  }
+  function stageCard(stage, badge) {
+    if (!stage) return "";
+    const d=stage.definition, summary=stage.summary || {};
+    const roman=["","Ⅰ","Ⅱ","Ⅲ","Ⅳ","Ⅴ","Ⅵ"];
+    const goalNames=new Set((stage.covenants || []).filter(c=>c.isGoal).map(c=>c.name));
+    const chips=[!stage.isFinal && !d.stacking && "≤ "+roman[d.maxTier]+" 阶", d.people+" 人",
+      d.tripleSlots && "三连 ≤ "+d.tripleSlots, d.stacking && "叠层"];
+    const roles=["盾 "+(summary.tanks || 0),summary.healingCovenant && !summary.healers?"奶 聚合":"奶 "+(summary.healers || 0),"叠 "+(summary.stackers || 0)];
+    const cards=stage.operators.map(o=>{
+      const tags=[o.isTank && "盾",o.isHealer && "奶",o.isStacker && "叠"].filter(Boolean);
+      const cvs=o.covenants || [];
+      const sub=o.transformedCovenant ? "转职 "+o.transformedCovenant : tags.join(" · ") || cvs.find(n=>goalNames.has(n)) || cvs[0] || "";
+      return `<button type="button" data-act="item" class="route-op" ${attr("key","op:"+o.name)}>
+        <span class="route-face ${o.role===1?"transition":"final"}">${portrait("op:"+o.name)}
+          <small class="tier">${esc(roman[o.tier] || o.tier)}</small>${o.viaTriple?'<small class="triple">三连</small>':""}${o.isNew?'<small class="new" title="本阶段新加入">新</small>':""}</span>
+        <strong>${esc(o.name)}</strong><small>${esc(sub)}</small></button>`;
+    }).join("");
+    return `<section class="route-stage-card"><div class="route-stage-head"><h4>${esc(stage.isFinal?"成型阵容":d.name)}</h4>
+      ${badge?tag(badge):""}<b>终端 ${esc(d.terminalLevel)}</b></div>
+      <div class="route-limits">${chips.filter(Boolean).map(tag).join("")}</div>
+      <div class="route-roles">${roles.map(tag).join("")}</div>
+      <div class="route-faces">${cards}</div></section>`;
+  }
+  function routePanel(route, advice, terminal, final=false) {
+    const all=(advice || []).flatMap((a,i)=>(a.levels || []).map(level=>({level,stage:route.stages[i]})));
+    const current=all.find(x=>x.level.terminalLevel===(final?0:terminal));
+    const entry=current || all.find(x=>x.level.terminalLevel>terminal);
+    if (!entry?.stage) return "";
+    const preview=!current;
+    return stageCard(entry.stage,preview?"下一本":"当前")+levelCard(entry.level,preview?"升至 "+entry.level.terminalLevel+" 本后 · ":"");
+  }
+  function levelCard(level,prefix="") {
     const picks=level.reserve || [];
     return `<section class="level-advice" data-advice-level="${Number(level.terminalLevel)}">
-      <h4>${esc(level.title)}</h4><dl>
+      <h4>${esc(prefix+level.title)}</h4><dl>
       <dt>当前目标</dt><dd>${esc(level.focus)}</dd>
-      <dt>优先购买</dt><dd class="advice-purchases">${esc(level.purchaseText || "本级暂无优先购买人选")}</dd>
+      <dt>优先购买 <small>按本局持有记录</small></dt><dd class="advice-purchases">${esc(level.purchaseText || "本级暂无优先购买人选")}</dd>
       <dt>升本条件</dt><dd>${esc(level.upgradeText)}</dd>
       <dd class="hint">${esc(level.economyText)}</dd>
       ${picks.length?`<dt>提前留牌</dt><dd>有余钱与空位再买，先留足关键购买和升级资金。</dd><dd class="advice-reserve">${picks.map(p=>`<button type="button" data-act="item" ${attr("key","op:"+p.name)}>${portrait("op:"+p.name)}<span><strong>${esc(p.name)}</strong><small>${esc(p.neededAt)}用</small></span></button>`).join("")}</dd>`:""}</dl></section>`;
@@ -234,7 +274,7 @@ const Planning = (() => {
     const level=stageAdvice.flatMap(a=>a.levels || []).find(l=>l.terminalLevel===req.terminal);
     return (
       (selectedPlan ? PlanMatch.summary(selectedPlan,req,level,selectedPlan===ranked[0]) : "") +
-      (auto && level ? levelCard(level) : "") +
+      (auto && display?.autoPlan ? routePanel(display.autoPlan.savedRoute,stageAdvice,req.terminal) : "") +
       section(auto ? "候选主盟约" : "候选阵容", `<small class="hint">本局终端 ${esc(db.run.terminal)} 本</small>`) +
       (value.limited || value.searchLimited
         ? `<p class="hint">已到搜索上限，以下为当前找到的候选。</p>`
@@ -252,7 +292,7 @@ const Planning = (() => {
       const units = s.entries.filter(e => e.key.startsWith("op:"));
       return `<details class="note"><summary>${esc(GuideModel.stageText(s))} · ${s.terminalLevel} 本 · ${units.length} 人</summary>
         <div class="plan-members recruit-members">${units.map(e => memberCard(e.key.slice(3), e.transformedCovenant, e.viaTriple && s.terminalLevel)).join("")}</div>
-        <p>${esc(s.note)}</p>${(stageAdvice[i]?.levels || []).map(levelCard).join("")}</details>`;
+        <p>${esc(s.note)}</p>${(stageAdvice[i]?.levels || []).map(l=>levelCard(l)).join("")}</details>`;
     }).join("")}</article>`;
   }
   function routeKey(team) {
@@ -526,5 +566,5 @@ const Planning = (() => {
     persist();
     render();
   });
-  return { render, click, chooseGoals, recruitment, tabs, levelCard };
+  return { render, click, chooseGoals, recruitment, tabs, levelCard, stageCard, routePanel, matchRoute, payload };
 })();

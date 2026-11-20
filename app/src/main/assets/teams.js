@@ -626,7 +626,7 @@ const Teams = (() => {
         ...t.autoPlan,
       });
       popup(
-        `<h2>自动路线</h2><p>当前 ${db.run.terminal} 本 · 第 ${db.run.round} 回合</p>${advice.map((x, i) => `<article class="note"><h4>${esc(t.autoPlan.savedRoute.stages[i].definition.name)}</h4>${(x.levels || []).map(Planning.levelCard).join("")}</article>`).join("")}`,
+        `<h2>自动路线</h2><p>当前 ${db.run.terminal} 本 · 第 ${db.run.round} 回合</p>${advice.map((x, i) => `<article class="note"><h4>${esc(t.autoPlan.savedRoute.stages[i].definition.name)}</h4>${Planning.stageCard(t.autoPlan.savedRoute.stages[i])}${(x.levels || []).map(l=>Planning.levelCard(l)).join("")}</article>`).join("")}`,
       );
       return;
     }

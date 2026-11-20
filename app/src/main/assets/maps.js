@@ -545,11 +545,11 @@ const Maps = (() => {
       ${db.run.round < GuideModel.maxRound ? W.act("map-next-round","下一回合","linkbtn") : ""}</div>
       <div id="map-run-panel" ${db.prefs.mapRunOpen ? "" : "hidden"}>${db.prefs.mapRunOpen ? W.runPanel() : ""}</div></section>
       <div id="map-next-step">${NextStep.view()}</div>`}
-      <div class="map-head map-preview-head"><button class="map-photo" type="button" data-w="map-zoom" aria-label="放大${esc(map.name)}"><img alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp"></button><div><strong>${esc(map.name)}</strong><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small><div class="actions">${W.act("map-gallery","看图选地图","btn light")}${W.act("map-zoom","放大","linkbtn")}</div></div><span hidden>${W.select(
+      <div class="map-head map-preview-head"><button class="map-photo" type="button" data-w="map-zoom" aria-label="放大${esc(map.name)}"><img alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp"></button><div><strong>${esc(map.name)}</strong><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small><div class="actions">${W.act("map-gallery","看图选地图","btn light")}${W.act("map-zoom","放大","linkbtn")}</div></div><label class="map-picker">切换地图${W.select(
       "map-id",
       W.data.garrison_maps.maps.map((z) => [z.id, z.name]),
       m.map,
-    )}</span></div>
+    )}</label></div>
       <div class="deploy-modes"><div class="tracking-tabs">${["战斗", "平衡", "叠层"].map((n, i) => W.act("map-mode-set", n, m.mode === i ? "chosen" : "", "" + i)).join("")}</div><div class="tracking-tabs">${[8, 9].map((i) => W.act("map-count-set", i, m.people === i ? "chosen" : "", "" + i)).join("")}</div></div>
       <div class="bench-head roster-bar"><strong>${workshopStage() ? "本阶段上场" : m.source === "owned" ? "本局持有" : "阵容试摆"} · ${m.pool.length} 名</strong><span>共 ${pool.length} 份 · 精锐 ${pool.filter(p=>p.isElite).length} 份</span>${workshopStage() ? "" : W.act("map-pool","快调干员","btn light")}</div>
       <article class="board-panel"><div class="board-shell"><div class="board-cols">${axisCols}</div><div class="board-rows">${axisRows}</div><div class="board">${grid}${m.routes ? routeLayer(map, min, m.filter || "both") : ""}</div></div>

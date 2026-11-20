@@ -58,14 +58,13 @@ const Economy = (() => {
       : Number.isInteger(initial)
         ? `升至 ${r.terminal + 1} 级基础价 ${initial} · 每过一回合减 1，最低 0`
         : "此模式缺少基础价资料";
-    const amounts = Array.from({length:maxMoney + 1}, (_, n) =>
-      `<button type="button" class="chip" data-w="money-use" data-v="${n}" aria-pressed="${r.money === n}">${n}</button>`).join("");
-    return `<div class="eco-grid"><div class="eco-card"><b>资金</b><strong>${Number.isInteger(r.money) ? r.money + " · 当前余额" : "按手机余额选择"}</strong><small>${esc(example)}</small>
-      <div class="balance-choices" role="group" aria-label="本局资金">${amounts}</div>
-      <div class="actions">${W.act("income-open","记录道具收入","btn light")}${extra ? `<small>本回合道具 +${extra}</small>` : ""}${r.money != null ? W.act("money-use", "清除余额", "linkbtn") : ""}${income ? W.act("money-use", "采用 " + opening, "linkbtn", String(opening)) : ""}</div>${fundingTable(r.mode,data)}</div>
+    const amounts=Array.from({length:maxMoney+1},(_,n)=>[n,n+" 资金"]);
+    return `<div class="eco-grid"><div class="eco-card">${W.control("当前余额", W.select("run-money",[["","未记录 · 选择手机上的余额"],...amounts],r.money ?? ""))}
+      <small>${esc(example)}${extra?" · 本回合道具 +"+extra:""}${income && extra?" · 本回合合计 "+opening:""}</small>
+      <div class="actions">${W.act("income-open","记录道具收入","btn light")}</div>${fundingTable(r.mode,data)}</div>
       <div class="eco-card"><b>升级价</b><strong>${full ? "已满级" : computed === null ? "选择升到本级的回合" : computed + " 资金"}</strong><small>${esc(costNote)}</small>
       ${!full && r.terminal > 1 ? W.control("升至当前等级的回合", W.select("run-levelSince", [["", "请选择"], ...Array.from({ length: r.round }, (_, i) => i + 1)], since || "")) : ""}
-      ${full ? "" : `<details><summary>按游戏画面修正价格</summary><input id="run-upgrade" aria-label="本次实际升级价" type="number" min="0" max="${Math.max(20, initial || 0, r.upgrade || 0)}" value="${r.upgrade ?? ""}">${W.act("price-auto", "恢复规则计算", "linkbtn")}</details>`}</div></div>`;
+      ${full ? "" : `<details><summary>按游戏画面修正价格</summary>${W.control("实际升级价",W.select("run-upgrade",[["","按规则计算"],...Array.from({length:Math.max(20,initial || 0,r.upgrade || 0)+1},(_,n)=>[n,n+" 资金"])],r.upgrade ?? ""))}</details>`}</div></div>`;
   }
   function changed(r, k) {
     if (k === "round" || k === "mode") r.incomeAnchor=null;

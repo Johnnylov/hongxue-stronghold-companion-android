@@ -43,9 +43,9 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     page.reload()
     panel = page.locator("#map-run-panel")
     expect(panel).to_be_visible()
-    balance = panel.get_by_role("group", name="本局资金").get_by_role("button")
-    assert balance.all_text_contents() == [str(n) for n in range(21)]
-    expect(balance.nth(20)).to_have_attribute("aria-pressed", "true")
+    balance = panel.locator("#run-money")
+    assert balance.locator("option").evaluate_all("(els)=>els.map(e=>e.value)") == [""]+[str(i) for i in range(21)]
+    expect(balance).to_have_value("20")
     assert page.evaluate("JSON.parse(localStorage.getItem('hongxue.tablet.v1')).run.money") == 20
     assert page.evaluate("Array.from({length:9},(_,i)=>Economy.funding('mode_single_funny',i+1,Workbench.data.economy).amount)") == [6,7,8,9,10,11,11,11,11]
     assert page.evaluate("Array.from({length:14},(_,i)=>Economy.funding('mode_single_1',i+1,Workbench.data.economy).amount)") == [4,5,6,7,8,9,10,11,11,11,11,11,11,11]
@@ -54,7 +54,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     assert page.evaluate("Economy.funding('mode_single_20',16,Workbench.data.economy)") is None
     panel.locator(".round-funding summary").click()
     expect(panel.locator(".round-funding div > span")).to_have_count(9)
-    panel.get_by_role("button",name="采用 6",exact=True).click()
+    balance.select_option("6")
     assert page.evaluate("db.run.money") == 6
     expect(page.locator(".board")).to_be_visible()
     assert page.evaluate("[db.page, db.board.source, db.run.counts, db.run.elite]") == [
@@ -73,8 +73,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     assert page.evaluate("db.run.elite['星极']") == 1
 
     def number(field, value):
-        panel.locator(f"#run-{field} + button").click()
-        page.locator('#point-dialog').get_by_role('button', name=str(value), exact=True).click()
+        panel.locator(f"#run-{field}").select_option(str(value))
 
     number("round", 14)
     number("terminal", 3)
@@ -84,11 +83,11 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     page.locator('[data-w="map-next-round"]').click()
     assert page.evaluate("[db.run.round,db.run.terminal,!!db.run.boss,db.run.enemyTypes.length]") == [15, 3, True, 2]
     expect(page.locator('[data-w="map-next-round"]')).to_have_count(0)
-    balance.nth(0).click()
-    expect(balance.nth(0)).to_have_attribute("aria-pressed", "true")
-    panel.get_by_role("button", name="清除余额").click()
+    balance.select_option("0")
+    expect(balance).to_have_value("0")
+    balance.select_option("")
     assert page.evaluate("db.run.money") is None
-    balance.nth(5).click()
+    balance.select_option("5")
     panel.get_by_text("按游戏画面修正价格").click()
     number("upgrade", 4)
     assert page.evaluate("[db.run.money,db.run.upgrade]") == [5,4]

@@ -129,8 +129,8 @@ function facts(entry) {
 function stageNum(team) {
   return Math.max(0, Math.min(team.stage || 0, team.stages.length - 1));
 }
-function stageTabs(stages, index, action) {
-  return `<div class="tabrow" aria-label="选择阶段">${stages.map((s, i) => button(action, GuideModel.stageText(s), i === index ? "chosen" : "", attr("index", i))).join("")}</div>`;
+function stageDropdown(stages,index,id,label="当前阶段") {
+  return Workbench.control(label,Workbench.select(id,stages.map((s,i)=>[i,GuideModel.stageText(s)]),index));
 }
 function move(page, detail = null) {
   if (db.page==="map" && db.workshopMap) Maps.leaveWorkshop();
@@ -270,7 +270,7 @@ function renderDetail(g) {
     <div class="actions">${editing ? button("rename", "编辑阵容", "btn light") : button("copy", "复制为我的阵容", "btn gold")}</div></div>
     ${g.tags?.length ? `<div class="tags controls">${g.tags.map(tag).join("")}</div>` : ""}${g.blurb ? `<p class="sub">${esc(g.blurb)}</p>` : ""}
     ${!editing && g.likes ? `<div class="actions"><span class="tag">👍 ${esc(g.likes)} · 内置阵容</span>${idButton("online", "联网读取作者讲解", g.id.slice(3), "linkbtn")}</div>` : ""}
-    ${editing ? Teams.pane(g) : ""}${stageTabs(g.stages, i, "detail-stage")}
+    ${editing ? Teams.pane(g) : ""}${stageDropdown(g.stages, i, "detail-stage")}
     ${s.note || editing ? `<div class="note">${esc(s.note || "可在「编辑阶段」里写下运营思路。")}</div>` : ""}
     ${s.bonds?.length ? `<div class="tags controls">${s.bonds.map(tag).join("")}</div>` : ""}
     ${editing ? `<div class="actions">${button("stage-quick", "快调干员", "btn")}${button("pick", "配干员 / 装备", "btn light")}${button("stage-edit", "编辑阶段", "btn light")}${button("jump", "查看购买清单", "btn light narrow-only")}</div>` : ""}
@@ -305,7 +305,7 @@ function renderBasket() {
       .join("")}</div>`;
   };
   basket.innerHTML = tabs + RunLineups.preview() + `<div class="basket-head"><div class="buytitle">${idButton("open-team", t.title, t.id, "linkbtn")}</div><span class="count">${done} / ${rows.length}</span></div>
-    <label><span class="hint">当前阶段</span><select class="compact-select" id="basketStage" aria-label="购买清单阶段">${t.stages.map((st, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${esc(GuideModel.stageText(st))}</option>`).join("")}</select></label>
+    ${stageDropdown(t.stages,idx,"basketStage","购买清单阶段")}
     <p class="hint">${s.rangeSource === "默认参考" ? "默认按 15 回合划分，可在「阶段与回合」调整。" : s.start ? "本阶段按指定回合范围执行。" : s.isFinal ? "成型目标按实际进度切换。" : "此阶段可手动切换。"}</p>
     <progress class="progress" value="${done}" max="${rows.length || 1}" aria-label="购买进度"></progress>
     ${rows.length ? group("op", "干员") + group("eq", "装备") : empty("当前阶段的清单是空的", "进入阵容，为这个阶段添加干员或装备。") + idButton("open-team", "去配阵容", t.id, "linkbtn")}
@@ -457,7 +457,7 @@ function confirmDialog(title, message, action, label) {
   );
 }
 function about() {
-  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.0.5 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
+  popup(`<h2>马头·卫戍手册</h2><p>Android 平板移植版 1.0.6 · 适配目标为三星 Galaxy Tab S8+。</p>${section("项目与数据")}<p>基于 bingyunhe/hongxue-stronghold-companion（15c074d）与 Moonfair/ASP_Assistant。游戏数据来自原项目整理的 PRTS 等资料，角色与美术版权属于各权利人。攻略保留作者与森空岛来源。</p>
     ${section("本地保存")}<p>阵容与购买进度保存在这台设备。卸载应用或清除应用数据会移除记录。</p>
     <div class="actions">${button("legal", "许可与归属", "btn light")}</div>`);
 }
@@ -504,14 +504,6 @@ document.addEventListener("click", async (ev) => {
   if (a === "copy") {
     incorporate(t);
     toast("已复制阵容，清单可开始勾选");
-    return;
-  }
-  if (a === "detail-stage") {
-    if (db.page === "teams") editStage(i);
-    else {
-      previewStage = i;
-      renderDetail(t);
-    }
     return;
   }
   if (["new", "rename", "stage-edit"].includes(a)) {
@@ -695,6 +687,13 @@ document.addEventListener("input", (ev) => {
 });
 document.addEventListener("change", (ev) => {
   const el = ev.target;
+  if (el.id === "detail-stage") {
+    const team=viewing(), i=Number(el.value);
+    if (!team?.stages[i]) return;
+    if (db.page==="teams") {team.stage=i;persist();render();}
+    else {previewStage=i;renderDetail(team);}
+    return;
+  }
   if (el.id === "basketStage") {
     editStage(Number(el.value));
     return;

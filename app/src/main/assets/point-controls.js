@@ -168,7 +168,7 @@ const PointControls = (() => {
       .filter((n) => n >= min && n <= max)
       .map((n) => option(n, n, n === current))
       .join("")}</div><p class="hint controls">其他金额可按数位选择</p>
-      ${["千位", "百位", "十位", "个位"].map((label, i) => `<div class="digit-row"><small>${label}</small>${Array.from({ length: 10 }, (_, n) => option(n, i + "/" + n, digits[i] === n, "digit")).join("")}</div>`).join("")}<div class="actions">${option("采用 " + Number(digits.join("")), Number(digits.join("")), true)}</div>`;
+      ${["千位", "百位", "十位", "个位"].map((label, i) => `<div class="digit-row"><small>${label}</small>${Array.from({ length: 10 }, (_, n) => option(n, i + "/" + n, digits[i] === n, "digit")).join("")}</div>`).join("")}<div class="actions">${option("确认数值 " + Number(digits.join("")), Number(digits.join("")), true)}</div>`;
   }
   function editor() {
     const el = target;

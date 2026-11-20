@@ -30,9 +30,25 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     guide.locator("summary").click()
     expect(guide.locator("li")).to_have_count(6)
     expect(guide.locator("small")).to_have_count(0)
+    # Compare the visible card against the actual C# route, including all per-operator marks.
+    page.evaluate("""()=>{const engine=Workbench.engine;Workbench.engine=async(a,...args)=>{
+      const result=await engine(a,...args); if(a==='autoRoute') window.testRoute=result; return result;};}""")
     page.locator('[data-act="map"]').click()
     panel = page.locator("#map-next-step")
-    expect(panel).to_contain_text("一本先用")
+    expect(panel).to_contain_text("当前 1 本",timeout=60000)
+    expect(panel.locator(".route-stage-card")).to_contain_text("开局")
+    expect(panel).to_contain_text("升至 2 本后")
+    expect(panel.locator(".advice-purchases")).to_contain_text("未记录获取")
+    expect(panel.locator(".route-stage-card .route-op")).to_have_count(6)
+    assert page.evaluate("""()=>{
+      const data=window.testRoute, stage=data.route.stages[0], level=data.advice[0].levels[0], panel=document.querySelector("#map-next-step");
+      const ops=[...panel.querySelectorAll(".route-op")], purchases=panel.querySelector(".advice-purchases");
+      return ops.length===stage.operators.length && ops.every((el,i)=>{
+        const o=stage.operators[i];
+        return el.dataset.key==="op:"+o.name && !!el.querySelector(".new")===o.isNew && !!el.querySelector(".triple")===o.viaTriple;
+      }) && purchases.innerText===level.purchaseText && panel.innerText.includes(level.upgradeText)
+        && [...panel.querySelectorAll(".advice-reserve button")].map(el=>el.dataset.key).join()===level.reserve.map(p=>"op:"+p.name).join();
+    }""")
     panel.locator('[data-w="owned"]').click()
     page.locator('[data-unit="深靛"] [data-quick-focus]').click()
     page.locator("[data-quick-save]").click()
@@ -48,7 +64,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     expect(panel).to_contain_text("再取 1 名可合成")
     expect(panel).to_contain_text("还差 4 资金")
     page.evaluate("db.run.banned=['深靛']; db.run.counts['砾']=1; render()")
-    expect(panel.locator("strong").first).to_contain_text("蓝毒")
+    expect(panel.locator(".next-shopping")).to_contain_text("蓝毒")
     page.evaluate("db.run.banned=[]; db.run.terminal=1; db.run.money=0; db.run.counts={'深靛':1,'砾':1}; db.run.elite={'深靛':1}; render()")
     expect(panel).to_contain_text("当前终端刷不到")
     page.evaluate("db.run.money=7; db.run.upgrade=4; render()")
@@ -60,7 +76,9 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     page.evaluate("""() => {
         db.run.terminal=2; db.run.money=5; db.run.counts={'深靛':1,'蓝毒':1};db.run.elite={'深靛':1};render();
     }""")
-    expect(panel).to_contain_text("本阶段干员已齐")
+    expect(panel.locator(".next-shopping")).to_contain_text("本阶段干员已齐")
+    expect(panel.locator("[data-next-route]")).to_contain_text("优先购买",timeout=60000)
+    expect(panel.locator("[data-next-route]")).to_contain_text("升本条件")
 
     # Generate and save a real desktop route. Advice must only re-evaluate this route, without new searches.
     page.evaluate("""async () => {
@@ -78,7 +96,7 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
     }""")
     expect(panel).to_contain_text("资金 2，升级费 8，还差 6", timeout=30000)
     assert page.evaluate("nextActions.filter(a=>['auto','autoRoute','target','route'].includes(a))") == []
-    page.evaluate("db.run.money=10; db.run.terminal=5; render()")
+    page.evaluate("active().stages[0].entries.reverse();active().stages[0].entries[0].elite=true;db.run.money=10; db.run.terminal=5; render()")
     expect(panel).to_contain_text("升级后剩 2")
     expect(panel).to_contain_text("五本")
     page.evaluate("db.run.terminal=6; db.run.upgrade=null; render()")
@@ -95,8 +113,8 @@ with ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Handler, directory=
         t.stages[0].entries=[{key:'op:星极',elite:true}];
         Object.assign(db.run,{counts:{'星极':1},elite:{}});render();
     }""")
-    expect(panel).to_contain_text("阵容已修改")
-    expect(panel).to_contain_text("星极 ×1")
+    expect(panel.locator(".route-source")).to_contain_text("本局推荐",timeout=60000)
+    expect(panel).to_contain_text("优先购买")
     page.evaluate("""() => {
         const grant=Object.values(Workbench.rawOps).find(op=>op.requiredStrategyId).name;
         const custom=Object.values(Workbench.rawOps).find(op=>op.isCustom).name;

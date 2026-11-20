@@ -564,7 +564,7 @@ const Workbench = (() => {
         .map(([k, n, min, max]) =>
           control(
             n,
-            `<input type="number" id="run-${k}" value="${esc(r[k])}" min="${min}" max="${max}">`,
+            select("run-"+k,Array.from({length:max-min+1},(_,i)=>[min+i,k==="round"?"第 "+(min+i)+" 回合":(min+i)+" 本"]),r[k]),
           ),
         )
         .join("")}</div>
@@ -602,14 +602,8 @@ const Workbench = (() => {
     const f = filterState(),
       p = db.prefs,
       r = db.run;
+    if (a==="next-retry") return NextStep.retry();
     if (a.startsWith("income-")) { ItemIncome.click(a,v); return; }
-    if (a === "money-use" || a === "price-auto") {
-      if (a === "price-auto") r.upgrade = null;
-      else ItemIncome.confirmBalance(r,v);
-      persist();
-      render();
-      return;
-    }
     if (a === "selection-facet") {
       selection.bondsOpen = $("selection-bond-panel")?.open;
       const [key, value] = v.split("/");
@@ -861,19 +855,10 @@ const Workbench = (() => {
       atlasResults();
     }
     if (e.id.startsWith("run-")) {
-      if (
-        e.type === "number" &&
-        (!e.checkValidity() || (!e.value && ["round", "terminal"].includes(k)))
-      ) {
-        e.value = db.run[k];
-        return;
-      }
-      db.run[k] =
-        e.type === "number"
-          ? e.value === ""
-            ? null
-            : Number(e.value)
-          : e.value;
+      const numeric=["round","terminal","upgrade","money","levelSince"].includes(k);
+      const value=numeric ? (e.value==="" ? null : Number(e.value)) : e.value;
+      if (k==="money") ItemIncome.confirmBalance(db.run,value);
+      else db.run[k]=value;
       Economy.changed(db.run, k);
       if (k === "mode") Maps.bansChanged();
       if (k === "round" && db.prefs.autoStage) Teams.roundChanged();

@@ -1104,7 +1104,7 @@ dialog:has(.quick-editor) { width: min(960px,96vw); padding: 16px; }
   background: var(--accent); color: var(--on-accent); font-style: normal; border-radius: 2px;
 }
 @media (max-width: 600px) {
-  .board-shell .tile { min-height: 60px; }
+  .board-shell .tile { min-height: 60px; width:100%; }
   .tile-name { font-size: 11px; }
 }
 
