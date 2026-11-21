@@ -6,6 +6,24 @@ const PhoneMirror=(()=>{
   let confirmed={};
   let lastPacket=0;
   let painted="";
+  let returnPage=null;
+  function overlayView(view){
+    const body=document.body;
+    if(!local)return;
+    const wasBoard=body.classList.contains("overlay-board");
+    if(wasBoard!==(view==="board") || body.classList.contains("overlay-library")!==(view==="guide"))close();
+    body.classList.toggle("overlay-library",view==="guide");
+    body.classList.toggle("overlay-board",view==="board");
+    if(view==="board" && !wasBoard){
+      returnPage={page:db.page,detail:db.detail};
+      if(db.page==="map"){render();window.scrollTo(0,0);}else move("map");
+      Maps.showInitial();
+    }else if(wasBoard && view!=="board"){
+      if(returnPage?.page==="map"){render();window.scrollTo(0,0);}
+      else if(returnPage)move(returnPage.page,returnPage.detail);
+      returnPage=null;
+    }
+  }
   let local=false,receipt="";
   function show(html){if(html!==painted){panel.innerHTML=html;painted=html;}}
   function paint(){
@@ -127,7 +145,7 @@ const PhoneMirror=(()=>{
   function reset(){Purchases.reset();previous={};confirmed={};shop=[];seen=false;lastPacket=lastFrame=0;pin="";receipt=advice="";pendingKey="";request++;}
   function event(type,value){
     if(type==="local"){reset();local=running=true;folded=false;panel.hidden=false;document.body.classList.add("local-game");message="等待平板游戏画面";}
-    else if(type==="off" || type==="error"){reset();local=running=false;device="";message=value;document.body.classList.remove("local-game","overlay-library");}
+    else if(type==="off" || type==="error"){overlayView("advice");reset();local=running=false;device="";message=value;document.body.classList.remove("local-game","overlay-library","overlay-board");}
     else if(!running)return;
     else if(type==="name"){device=value;message="等待 iPhone 投屏";}
     else if(type==="pin"){pin=value;message="在 iPhone 上输入配对码";folded=false;}
@@ -158,6 +176,6 @@ const PhoneMirror=(()=>{
   setInterval(()=>{if(running && Math.max(lastFrame,lastPacket) && Date.now()-Math.max(lastFrame,lastPacket)>12000){
     reset();message=local?"等待平板游戏更新画面":"暂未收到新画面；接收器仍在监听 "+device;paint();
   }},2000);
-  return {event};
+  return {event,overlayView};
 })();
 window.PhoneMirror=PhoneMirror;

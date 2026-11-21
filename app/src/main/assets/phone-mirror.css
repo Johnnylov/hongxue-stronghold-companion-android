@@ -5,5 +5,19 @@
 #phone-panel .mirror-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 #phone-panel .mirror-shop{display:flex;flex-wrap:wrap;gap:5px}
 #phone-connect{white-space:nowrap;font-weight:bold;cursor:pointer}
-body.local-game:not(.overlay-library)>header,body.local-game:not(.overlay-library)>main,body.overlay-library #phone-panel,body.local-game #phone-connect{display:none}
+body.local-game:not(.overlay-library)>header,body.local-game:not(.overlay-library):not(.overlay-board)>main,body.overlay-library #phone-panel,body.overlay-board #phone-panel,body.local-game #phone-connect{display:none}
 body.local-game:not(.overlay-library) #phone-panel{position:static;width:auto;max-height:none;margin:0;border:0;box-shadow:none}
+body.overlay-board main{display:block;min-height:0;margin:0;padding:0}
+body.overlay-board #desk{width:100%;padding:4px 7px}
+body.overlay-board #basket{display:none}
+.overlay-board .deploy-layout{display:flex;flex-direction:column;max-width:none}
+.overlay-board .deploy-layout>*{order:1}
+.overlay-board .map-preview-head,.overlay-board .deploy-modes,.overlay-board .map-solve-row,.overlay-board .board-panel{order:0;margin:0 0 4px}
+.overlay-board .map-head.map-preview-head{padding:3px 6px;gap:6px;flex-wrap:nowrap}
+.overlay-board .map-photo{width:60px;flex:none}
+.overlay-board .map-preview-head>.btn{flex:1;text-align:left}
+.overlay-board .deploy-modes .tracking-tabs button{min-height:36px}
+.overlay-board .board-panel{padding:4px}
+.overlay-board .board-shell{max-width:none;grid-template-columns:18px minmax(0,1fr);grid-template-rows:16px auto}
+.overlay-board .board-shell .tile{min-height:0;height:clamp(34px,calc((100vh - 202px)/var(--rows)),60px);aspect-ratio:auto}
+.overlay-board .board-shell .tile-name{font-size:12px;line-height:1.1}

@@ -180,7 +180,7 @@ const Maps = (() => {
     }
   }
   function resumeMode() {
-    if (db.page!=="map" || (base().tab || "board")!=="board") return;
+    if (db.page!=="map" || ((base().tab || "board")!=="board" && !document.body.classList.contains("overlay-board"))) return;
     const m=base(), sh=sheet();
     if(sh.pendingMode===m.mode && candidates().length) void calculate("placement");
   }
@@ -456,7 +456,8 @@ const Maps = (() => {
       min = W.data.garrison_maps.columns[0];
     const selectedPiece = sh.placed[selected];
     const roles = ["输出", "承伤", "辅助", "叠层"];
-    const sub = m.tab || "board";
+    const floating=document.body.classList.contains("overlay-board");
+    const sub = floating ? "board" : m.tab || "board";
     const tabs = workshopStage() ? W.act("map-workshop-back","‹ 返回阵容推演 · "+workshopStage().label,"btn light") : `<div class="tracking-tabs">${[
       ["shop", "购买清单"],
       ["recommend", "推荐阵容"],
@@ -592,17 +593,17 @@ const Maps = (() => {
     const feedback=busy?modeNames[m.mode]+" · "+status:!pool.length?
       modeNames[m.mode]+"模式 · 当前棋盘无可部署干员。"+emptyHint:
       sh.feedback || (m.needsSolve?"干员或站位已调整，可重新推荐。":modeNames[m.mode]+"模式 · 可按当前阵容推荐站位。");
-    desk.innerHTML = `<div class="deploy-layout">${tabs}
-      ${workshopStage() ? "" : `<section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
+    desk.innerHTML = `<div class="deploy-layout">${floating?"":tabs}
+      ${workshopStage() || floating ? "" : `<section class="map-run"><div class="map-run-bar"><button type="button" class="btn light" data-w="map-run-toggle" aria-controls="map-run-panel" aria-expanded="${!!db.prefs.mapRunOpen}">对局设置 ${db.prefs.mapRunOpen ? "▴" : "▾"}</button>
       <span>第 ${db.run.round} 回合 · 终端 ${db.run.terminal} 级${db.run.money == null ? "" : " · 资金 " + esc(db.run.money)}</span>
       ${W.advanceButton()}</div>
       <div id="map-run-panel" ${db.prefs.mapRunOpen ? "" : "hidden"}>${db.prefs.mapRunOpen ? W.runPanel() : ""}</div></section>
       <div id="map-next-step">${NextStep.view()}</div>`}
-      <div class="map-head map-preview-head"><button class="map-photo" type="button" data-w="map-zoom" aria-label="放大${esc(map.name)}"><img alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp"></button><div><strong>${esc(map.name)}</strong><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small><div class="actions">${W.act("map-gallery","看图选地图","btn light")}${W.act("map-zoom","放大","linkbtn")}</div></div><label class="map-picker">切换地图${W.select(
+      <div class="map-head map-preview-head"><button class="map-photo" type="button" data-w="map-zoom" aria-label="放大${esc(map.name)}"><img alt="${esc(map.name)}全图" src="img/${esc(map.id)}.webp"></button>${floating?W.act("map-gallery","换图 · "+map.name,"btn light"):`<div><strong>${esc(map.name)}</strong><small>终端 ${db.run.terminal} 级${sh.active?.length ? " · " + esc(sh.active.join(" · ")) : ""}</small><div class="actions">${W.act("map-gallery","看图选地图","btn light")}${W.act("map-zoom","放大","linkbtn")}</div></div><label class="map-picker">切换地图${W.select(
       "map-id",
       W.data.garrison_maps.maps.map((z) => [z.id, z.name]),
       m.map,
-    )}</label></div>
+    )}</label>`}</div>
       <div class="deploy-modes"><div class="tracking-tabs" role="group" aria-label="站位模式">${modeNames.map((n,i)=>`<button type="button" data-w="map-mode-set" data-v="${i}" aria-pressed="${m.mode===i}" class="${m.mode===i?"chosen":""}">${n}</button>`).join("")}</div><div class="tracking-tabs">${[8, 9].map((i) => W.act("map-count-set", i, m.people === i ? "chosen" : "", "" + i)).join("")}</div></div>
       <div class="map-solve-row"><button type="button" class="btn gold" data-w="map-solve" ${runningPlan?"disabled":""}>${solveTitle}</button>${busy?W.act("map-cancel","取消计算","linkbtn"):""}
         <span id="map-mode-status" role="status">${esc(feedback)}</span></div>

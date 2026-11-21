@@ -29,14 +29,16 @@ public final class GameOverlay extends Service {
     private WindowManager.LayoutParams layout;
     private LinearLayout window;
     private TextView handle;
-    private Button guide,stop;
+    private Button advice,board,guide,stop;
     private WebView web;
     private MainActivity owner;
     private MediaProjection projection;
     private VirtualDisplay display;
     private volatile ImageReader reader;
     private ShopOcr ocr;
-    private volatile boolean closed,library;
+    private volatile boolean closed;
+    private enum Page { ADVICE, BOARD, GUIDE }
+    private Page page=Page.BOARD;
     private boolean folded=true;
     private volatile int generation;
     private long sampled;
@@ -82,10 +84,11 @@ public final class GameOverlay extends Service {
         LinearLayout bar=new LinearLayout(this);bar.setBackgroundColor(0xff332e51);window.addView(bar);
         handle=new TextView(this);handle.setTextColor(-1);handle.setGravity(Gravity.CENTER);handle.setPadding(dp(10),0,dp(10),0);
         bar.addView(handle,new LinearLayout.LayoutParams(-2,dp(40)));
-        guide=new Button(this);guide.setText("攻略");bar.addView(guide,new LinearLayout.LayoutParams(-2,dp(40)));
-        stop=new Button(this);stop.setText("结束");bar.addView(stop,new LinearLayout.LayoutParams(-2,dp(40)));
-        stop.setOnClickListener(v->stopSelf());guide.setOnClickListener(v->{library=!library;generation++;web.evaluateJavascript("Purchases.reset()",null);updateWindow();});
-        handle.setOnClickListener(v->{folded=!folded;library=false;generation++;updateWindow();});
+        advice=barButton(bar,"建议",v->select(Page.ADVICE));
+        board=barButton(bar,"站位",v->select(Page.BOARD));
+        guide=barButton(bar,"攻略",v->select(Page.GUIDE));
+        stop=barButton(bar,"结束",v->stopSelf());
+        handle.setOnClickListener(v->{folded=!folded;updateWindow();});
         handle.setOnTouchListener(new View.OnTouchListener(){
             float x,y;int left,top;boolean drag;
             public boolean onTouch(View v,MotionEvent e){
@@ -106,6 +109,15 @@ public final class GameOverlay extends Service {
         layout.gravity=Gravity.TOP|Gravity.LEFT;layout.x=dp(8);layout.y=dp(40);
         wm.addView(window,layout);updateWindow();
     }
+    private Button barButton(LinearLayout bar,String name,View.OnClickListener action){
+        Button button=new Button(this);button.setText(name);button.setSingleLine();
+        button.setMinWidth(0);button.setMinimumWidth(0);button.setPadding(dp(3),0,dp(3),0);
+        button.setOnClickListener(action);bar.addView(button,new LinearLayout.LayoutParams(0,dp(40),1));return button;
+    }
+    private void select(Page value){
+        if(page==value)return;
+        page=value;generation++;web.evaluateJavascript("Purchases.reset()",null);updateWindow();
+    }
     private void position(){
         DisplayMetrics m=getResources().getDisplayMetrics();
         layout.x=Math.max(0,Math.min(layout.x,m.widthPixels-Math.max(dp(70),layout.width)));
@@ -113,12 +125,17 @@ public final class GameOverlay extends Service {
         wm.updateViewLayout(window,layout);
     }
     private void updateWindow(){
-        DisplayMetrics m=getResources().getDisplayMetrics();handle.setText(folded?"马头 ▸":"马头 ▾");guide.setText(library?"建议":"攻略");
-        guide.setVisibility(folded?View.GONE:View.VISIBLE);stop.setVisibility(folded?View.GONE:View.VISIBLE);
+        DisplayMetrics m=getResources().getDisplayMetrics();handle.setText(folded?"马头 ▸":"马头 ▾");
+        for(Button b:new Button[]{advice,board,guide,stop}){
+            b.setVisibility(folded?View.GONE:View.VISIBLE);
+            boolean chosen=b==advice && page==Page.ADVICE || b==board && page==Page.BOARD || b==guide && page==Page.GUIDE;
+            b.setSelected(chosen);b.setTextColor(chosen?0xff5035af:0xff292430);b.setTypeface(null,chosen?Typeface.BOLD:Typeface.NORMAL);
+        }
         web.setVisibility(folded?View.GONE:View.VISIBLE);
-        layout.width=folded?dp(74):Math.min(m.widthPixels,library?(int)(m.widthPixels*.84):dp(350));
-        layout.height=folded?dp(40):Math.min((int)(m.heightPixels*.85),library?m.heightPixels:dp(240));
-        web.evaluateJavascript("document.body.classList.toggle('overlay-library',"+library+")",null);position();
+        layout.width=folded?dp(74):Math.min(m.widthPixels,page==Page.ADVICE?dp(350):Math.min((int)(m.widthPixels*.93),page==Page.BOARD?dp(670):m.widthPixels));
+        layout.height=folded?dp(40):Math.min((int)(m.heightPixels*.90),page==Page.ADVICE?dp(240):m.heightPixels);
+        position();
+        if(!folded)web.evaluateJavascript("PhoneMirror.overlayView('"+page.name().toLowerCase(java.util.Locale.ROOT)+"')",null);
     }
     @Override public void onConfigurationChanged(Configuration conf){
         super.onConfigurationChanged(conf);
