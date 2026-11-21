@@ -38,13 +38,17 @@ final class MirrorReceiver extends NativeBridge {
     private final NsdManager nsd;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final AtomicBoolean reading=new AtomicBoolean();
-    private final Object video=new Object();
+    private final ExecutorService decoder=Executors.newSingleThreadExecutor();
+    private final java.util.concurrent.Semaphore videoSlots=new java.util.concurrent.Semaphore(12);
+    private final AtomicBoolean awaitKeyframe=new AtomicBoolean();
     private MediaCodec codec;
     private ShopOcr ocr;
-    private long handle, lastFrame;
-    private int width=1920,height=1080, generation;
+    private long handle, lastFrame, lastPacketNotice;
+    private int width=1920,height=1080;
+    private volatile int generation;
     private volatile boolean closed;
     private WifiManager.MulticastLock lock;
+    private WifiManager.WifiLock wifiLock;
     private NsdManager.RegistrationListener registration;
     private final ExecutorService discovery=Executors.newSingleThreadExecutor();
     private JmDNS fallback;
@@ -91,6 +95,7 @@ final class MirrorReceiver extends NativeBridge {
             new File(context.getFilesDir(),"mirror.key").getPath(),false,true);
         if(handle==0) throw new IllegalStateException("无法初始化投屏接收器");
         nativeSetDisplaySize(handle,1920,1080,30);
+        nativeSetPlist(handle,"maxFPS",30);
         nativeSetH265Enabled(handle,false);
         nativeSetHlsEnabled(handle,false);
         nativeSetFeature(handle,7,true);
@@ -99,6 +104,8 @@ final class MirrorReceiver extends NativeBridge {
         if(port<1) throw new IllegalStateException("投屏端口不可用");
         WifiManager wifi=(WifiManager)context.getSystemService(Context.WIFI_SERVICE);
         lock=wifi.createMulticastLock("matou-airplay"); lock.acquire();
+        wifiLock=wifi.createWifiLock(android.os.Build.VERSION.SDK_INT>=29?WifiManager.WIFI_MODE_FULL_LOW_LATENCY:WifiManager.WIFI_MODE_FULL_HIGH_PERF,"matou-video");
+        wifiLock.acquire();
         NsdServiceInfo info=new NsdServiceInfo();
         info.setServiceName(nativeGetServerName(handle)); info.setServiceType("_airplay._tcp"); info.setPort(port);
         Map<String,String> txt=nativeGetAirplayTxtRecords(handle);
@@ -118,25 +125,33 @@ final class MirrorReceiver extends NativeBridge {
         discovery.execute(()->{if(fallback!=null)try{fallback.close();}catch(java.io.IOException ignored){}});
         discovery.shutdown();
         if(lock!=null && lock.isHeld())lock.release();
+        if(wifiLock!=null && wifiLock.isHeld())wifiLock.release();
         if(handle!=0){nativeStop(handle);nativeDestroy(handle);handle=0;}
-        synchronized(video){resetCodec();}
-        worker.execute(()->{if(ocr!=null)ocr.close();});worker.shutdown();
+        decoder.execute(()->{resetCodec();worker.execute(()->{if(ocr!=null)ocr.close();});worker.shutdown();});
+        decoder.shutdown();
     }
     public void onDisplayPin(String pin){emit("pin",pin);}
-    public void onConnectionReset(int reason){onMirrorRunning(false);}
+    public void onConnectionReset(int reason){emit("reset",reason);}
     public void onMirrorRunning(boolean active){
-        if(!active)synchronized(video){generation++;resetCodec();}
+        if(closed)return;
+        if(!active)decoder.execute(()->{generation++;resetCodec();awaitKeyframe.set(false);});
         emit("stream",active);
     }
     public void onVideoSize(float sw,float sh,float w,float h){
-        synchronized(video){if(w>0 && h>0 && ((int)w!=width || (int)h!=height)){
-            width=(int)w;height=(int)h; generation++;resetCodec();}}
+        if(!closed)decoder.execute(()->{if(w>0 && h>0 && ((int)w!=width || (int)h!=height)){
+            width=(int)w;height=(int)h; generation++;resetCodec();}});
     }
     private void resetCodec(){if(codec!=null){try{codec.release();}catch(RuntimeException ignored){} codec=null;}}
     public void onVideoData(byte[] data,long timeNs,boolean hevc) {
-        synchronized(video){
-            if(closed || hevc || data.length==0)return;
+        if(closed || hevc || data.length==0)return;
+        long now=SystemClock.elapsedRealtime();
+        if(now-lastPacketNotice>2000){lastPacketNotice=now;emit("packet",true);}
+        if(awaitKeyframe.get() && !syncPacket(data))return;
+        if(!videoSlots.tryAcquire()){awaitKeyframe.set(true);return;}
+        awaitKeyframe.set(false);
+        decoder.execute(()->{
             try {
+                if(closed)return;
                 if(codec==null) {
                     codec=MediaCodec.createDecoderByType("video/avc");
                     MediaFormat format=MediaFormat.createVideoFormat("video/avc",width,height);
@@ -150,10 +165,17 @@ final class MirrorReceiver extends NativeBridge {
                     ByteBuffer buffer=codec.getInputBuffer(idx);buffer.clear();
                     if(buffer.remaining()<data.length)throw new IllegalArgumentException("视频帧过大");
                     buffer.put(data);codec.queueInputBuffer(idx,0,data.length,timeNs/1000,0);
-                }
+                }else awaitKeyframe.set(true);
                 drain();
-            } catch(Exception e){resetCodec();emit("status","视频解码失败，等待下一帧");}
+            } catch(Exception e){resetCodec();awaitKeyframe.set(true);emit("status","视频解码恢复中，等待关键帧");}
+            finally{videoSlots.release();}
+        });
+    }
+    private boolean syncPacket(byte[] data){
+        for(int i=2;i+1<data.length;i++)if(data[i]==1 && data[i-1]==0 && data[i-2]==0){
+            int type=data[i+1]&31;if(type==5 || type==7 || type==8)return true;
         }
+        return false;
     }
     private void drain() {
         MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
@@ -166,30 +188,44 @@ final class MirrorReceiver extends NativeBridge {
                 if(now-lastFrame<900 || reading.get() || info.size==0) continue;
                 try(Image frame=codec.getOutputImage(idx)){
                     if(frame==null)continue;
-                    Bitmap image=bitmap(frame);
+                    Frame image=new Frame(frame);
                     lastFrame=now; reading.set(true);int epoch=generation;
                     worker.execute(()->recognize(image,epoch));
                 }
             } finally{codec.releaseOutputBuffer(idx,false);}
         }
     }
-    private void recognize(Bitmap image,int epoch){
+    private void recognize(Frame frame,int epoch){
+        Bitmap image=null;
         try {
             if(closed)return;
+            image=frame.bitmap();
             if(ocr==null)ocr=new ShopOcr(context);
             JSONObject result=ocr.read(image);
-            synchronized(video){if(!closed && generation==epoch)emit("frame",result);}
+            if(!closed && generation==epoch)emit("frame",result);
         }catch(Exception e){emit("status","识别失败："+e.getClass().getSimpleName());}
-        finally{image.recycle();reading.set(false);}
+        finally{if(image!=null)image.recycle();reading.set(false);}
     }
-    private static Bitmap bitmap(Image image){
-        Rect r=image.getCropRect();int w=r.width(),h=r.height();
-        Image.Plane y=image.getPlanes()[0];ByteBuffer b=y.getBuffer(); int base=b.position();
-        int[] pixels=new int[w*h];
-        for(int row=0;row<h;row++){
-            int offset=base+(row+r.top)*y.getRowStride()+r.left*y.getPixelStride();
-            for(int x=0;x<w;x++){int v=b.get(offset+x*y.getPixelStride())&255; pixels[row*w+x]=0xff000000|v*0x010101;}
+    private static final class Frame {
+        final Rect crop;final byte[][] bytes=new byte[3][];final int[] row=new int[3],step=new int[3];
+        Frame(Image image){
+            crop=new Rect(image.getCropRect());
+            for(int c=0;c<3;c++){
+                Image.Plane plane=image.getPlanes()[c];ByteBuffer b=plane.getBuffer();
+                bytes[c]=new byte[b.remaining()];b.get(bytes[c]);
+                row[c]=plane.getRowStride();step[c]=plane.getPixelStride();
+            }
         }
-        return Bitmap.createBitmap(pixels,w,h,Bitmap.Config.ARGB_8888);
+        int clip(int v){return Math.max(0,Math.min(255,v>>8));}
+        Bitmap bitmap(){
+            int w=crop.width(),h=crop.height();int[] pixels=new int[w*h];
+            for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+                int px=x+crop.left,py=y+crop.top;
+                int l=298*((bytes[0][py*row[0]+px*step[0]]&255)-16)+128;
+                int u=(bytes[1][py/2*row[1]+px/2*step[1]]&255)-128,v=(bytes[2][py/2*row[2]+px/2*step[2]]&255)-128;
+                pixels[y*w+x]=0xff000000|(clip(l+409*v)<<16)|(clip(l-100*u-208*v)<<8)|clip(l+516*u);
+            }
+            return Bitmap.createBitmap(pixels,w,h,Bitmap.Config.ARGB_8888);
+        }
     }
 }

@@ -5,3 +5,5 @@
 #phone-panel .mirror-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
 #phone-panel .mirror-shop{display:flex;flex-wrap:wrap;gap:5px}
 #phone-connect{white-space:nowrap;font-weight:bold;cursor:pointer}
+body.local-game:not(.overlay-library)>header,body.local-game:not(.overlay-library)>main,body.overlay-library #phone-panel,body.local-game #phone-connect{display:none}
+body.local-game:not(.overlay-library) #phone-panel{position:static;width:auto;max-height:none;margin:0;border:0;box-shadow:none}

@@ -11,6 +11,7 @@ public abstract class NativeBridge {
     public native void nativeDestroy(long h);
     public native void nativeSetDisplaySize(long h, int width, int height, int fps);
     public native void nativeSetH265Enabled(long h, boolean enabled);
+    public native void nativeSetPlist(long h,String name,int value);
     public native void nativeSetHlsEnabled(long h, boolean enabled);
     public native void nativeSetFeature(long h, int bit, boolean enabled);
     public native Map<String,String> nativeGetAirplayTxtRecords(long h);

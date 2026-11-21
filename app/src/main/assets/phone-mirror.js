@@ -4,19 +4,22 @@ const PhoneMirror=(()=>{
   let running=false,folded=false,device="",pin="",message="",previous={},shop=[],advice="",request=0;
   let lastFrame=0,pendingKey="",seen=false;
   let confirmed={};
+  let lastPacket=0;
   let painted="";
+  let local=false,receipt="";
   function show(html){if(html!==painted){panel.innerHTML=html;painted=html;}}
   function paint(){
     panel.classList.toggle("folded",folded);
     if(folded){show('<button class="btn light" data-m="expand">iPhone · '+esc(seen?"本局建议":"投屏连接")+'</button>');return;}
-    const head='<div class="mirror-head"><b>iPhone 对局助手</b><button class="linkbtn" data-m="fold">收起</button></div>';
+    const head=local?'':'<div class="mirror-head"><b>游戏连接</b><button class="linkbtn" data-m="fold">收起</button></div>';
     const help=device?'iPhone 控制中心 → 屏幕镜像 → '+device:'两台设备连接同一 Wi-Fi，在平板前台接收。';
     show(head+'<p>'+esc(message || help)+'</p>'+
-      (running && device && !seen?'<p>'+esc(help)+'</p>':'')+
-      (pin?'<p><b>配对码 '+esc(pin)+'</b></p>':'')+
+      (running && device && !seen && !lastFrame && !lastPacket?'<p>'+esc(help)+'</p>':'')+
+      (pin?'<p><b>配对码 '+esc(pin)+'</b></p>':'')+(receipt?'<p>'+esc(receipt)+'</p>':'')+
       (seen?'<p>第 '+db.run.round+' 回合'+(confirmed.round===db.run.round?'':'（记录）')+' · '+db.run.terminal+' 本'+(confirmed.terminal===db.run.terminal?'':'（记录）')+' · '+(db.run.money==null?'余额待确认':'余额 '+db.run.money+(confirmed.money===db.run.money?'':'（记录）'))+(db.run.terminal<6 && confirmed.upgrade!=null?' · 升本需 '+confirmed.upgrade:'')+'</p><p><b>'+esc(advice || "正在按当前阵容计算")+'</b></p>':'')+
       '<div class="mirror-shop">'+shop.map(n=>catalogue["op:"+n]?'<button class="btn light" data-unit-buy="'+esc(n)+'">拿了'+esc(n)+' ＋1</button>':'<span>'+esc(n)+'</span>').join("")+'</div>'+
-      '<button class="linkbtn" data-m="'+(running?'stop':'start')+'">'+(running?'断开 iPhone':'开始接收')+'</button>');
+      (local?'':(running?'':'<button class="btn" data-m="local">本机游戏悬浮窗</button>')+
+      '<button class="linkbtn" data-m="'+(running?'stop':'start')+'">'+(running?'断开 iPhone':'接收 iPhone 投屏')+'</button>'));
   }
   async function recommend(){
     const req=Planning.payload("auto"), key=JSON.stringify([req,shop]);
@@ -36,8 +39,61 @@ const PhoneMirror=(()=>{
     }catch{if(token!==request)return;advice="当前阵容暂无路线，可在规划页调整";}
     paint();
   }
+  function parseInfo(raw){
+    if(!raw)return null;
+    const clean=s=>s.replace(/[^\u3400-\u9fff0-9]/g,"");
+    const text=clean(raw.enemies.join("")), types=Object.entries(Workbench.data.enemy_types.types)
+      .filter(([,v])=>text.includes("特训敌人"+v.typeName) || text.includes("特训致人"+v.typeName)).map(([id])=>id).sort();
+    const bosses=Workbench.data.bosses.bosses, boss=bosses.find(b=>text.includes(clean(b.name)))?.name;
+    const mode= bosses[0].hp.find(m=>raw.modes.some(t=>clean(t)===clean(m.name)))?.mode;
+    const names=new Set(Workbench.data.covenants.covenants.map(b=>b.name)), states={};
+    for(const icon of raw.icons){
+      const name=clean(icon.text).replace("伊利亚","伊比利亚");
+      if(names.has(name))states[name]=icon.banned;
+    }
+    // Colour evidence from this screen is required before interpreting grey as banned.
+    if(!Object.values(states).includes(false))return {boss,types,mode,states:{}};
+    return {boss,types,mode,states};
+  }
+  function infoFrame(raw){
+    const info=parseInfo(raw), old=previous.match, r=db.run;
+    previous={match:info};seen=false;shop=[];advice="";pendingKey="";request++;
+    if(!old){message="正在核对本局信息";paint();return;}
+    let changed=false,bansChanged=false;
+    const parts=[];
+    if(info.mode && info.mode===old.mode){
+      if(r.mode!==info.mode){r.mode=info.mode;Economy.changed(r,"mode");changed=bansChanged=true;}
+      parts.push(Workbench.data.bosses.bosses[0].hp.find(m=>m.mode===info.mode).name);
+    }
+    if(info.boss && info.boss===old.boss){if(r.boss!==info.boss){r.boss=info.boss;changed=true;}parts.push(info.boss);}
+    const types=info.types.filter(t=>old.types.includes(t));
+    if(types.length){
+      const next=types.length===3?types:[...new Set([...r.enemyTypes,...types])].sort();
+      if(next.join()!==[...r.enemyTypes].sort().join()){r.enemyTypes=next;changed=true;}
+      parts.push("特训："+types.map(k=>Workbench.data.enemy_types.types[k].typeName).join("、"));
+    }
+    const stable=Object.entries(info.states).filter(([name,v])=>old.states[name]===v);
+    if(stable.length){
+      const bonds=new Set(r.bannedBonds);
+      for(const [name,ban] of stable){if(ban)bonds.add(name);else bonds.delete(name);}
+      if(bonds.size!==r.bannedBonds.length || r.bannedBonds.some(n=>!bonds.has(n))){
+        r.bannedBonds=[...bonds];changed=bansChanged=true;
+      }
+      parts.push("已核对 "+stable.length+" 个盟约，禁用 "+stable.filter(([,v])=>v).length+" 个");
+    }
+    if(bansChanged)Maps.bansChanged();
+    if(changed){persist();render();}
+    message=parts.length?"本局信息 · "+parts.join(" · "):"已看到本局信息，等待读清文字和图标";paint();
+  }
   function frame(data){
     lastFrame=Date.now();
+    const bought=Purchases.observe(data);
+    if(bought.length){
+      for(const name of bought)addOwned(name);
+      receipt="自动入池："+bought.join("、");
+      Maps.ownedChanged();persist();render();
+    }
+    if(data.info){infoFrame(data.info);return;}
     const agree=k=>data[k]!==undefined && data[k]===previous[k];
     const valid=(n,min,max)=>Number.isInteger(n) && n>=min && n<=max;
     let changed=false;
@@ -64,13 +120,20 @@ const PhoneMirror=(()=>{
     if(seen)recommend();
     paint();
   }
-  function reset(){previous={};confirmed={};shop=[];seen=false;lastFrame=0;pin="";advice="";pendingKey="";request++;}
+  function addOwned(name){
+    const unit={name,count:db.run.counts[name] || 0,elite:db.run.elite[name] || 0};
+    QuickRoster.setNumber(unit,"buy",1);db.run.counts[name]=unit.count;db.run.elite[name]=unit.elite;
+  }
+  function reset(){Purchases.reset();previous={};confirmed={};shop=[];seen=false;lastPacket=lastFrame=0;pin="";receipt=advice="";pendingKey="";request++;}
   function event(type,value){
-    if(type==="off" || type==="error"){reset();running=false;device="";message=value;}
+    if(type==="local"){reset();local=running=true;folded=false;panel.hidden=false;document.body.classList.add("local-game");message="等待平板游戏画面";}
+    else if(type==="off" || type==="error"){reset();local=running=false;device="";message=value;document.body.classList.remove("local-game","overlay-library");}
     else if(!running)return;
     else if(type==="name"){device=value;message="等待 iPhone 投屏";}
     else if(type==="pin"){pin=value;message="在 iPhone 上输入配对码";folded=false;}
     else if(type==="frame"){frame(value);return;}
+    else if(type==="packet"){lastPacket=Date.now();return;}
+    else if(type==="reset"){reset();message="投屏连接已中断（接收器代码 "+value+"）。请在 iPhone 屏幕镜像重新选择 "+device;}
     else if(type==="stream"){reset();message=value==="true"?"已连接，等待画面":"已断开，等待重新投屏";}
     else if(type==="status"){message=value;}
     paint();
@@ -81,19 +144,19 @@ const PhoneMirror=(()=>{
     const b=e.target.closest("button");if(!b)return;
     const n=b.dataset.unitBuy;
     if(n && shop.includes(n)){
-      const unit={name:n,count:db.run.counts[n] || 0,elite:db.run.elite[n] || 0};
-      QuickRoster.setNumber(unit,"buy",1);db.run.counts[n]=unit.count;db.run.elite[n]=unit.elite;
+      Purchases.credited(n);addOwned(n);
       Maps.ownedChanged();persist();render();toast("已记录购入"+n);recommend();return;
     }
     switch(b.dataset.m){
+      case "local":message="请允许悬浮窗和屏幕共享，再打开游戏";Tablet.localGame();break;
       case "start":reset();running=true;message="正在启动局域网接收";Tablet.phoneMirror(true);break;
       case "stop":Tablet.phoneMirror(false);break;
       case "fold":if(!running){panel.hidden=true;return;}folded=true;break;
       case "expand":folded=false;break;
     }paint();
   };
-  setInterval(()=>{if(running && lastFrame && Date.now()-lastFrame>7000){
-    reset();message="暂未收到新画面，等待 iPhone 恢复投屏";paint();
+  setInterval(()=>{if(running && Math.max(lastFrame,lastPacket) && Date.now()-Math.max(lastFrame,lastPacket)>12000){
+    reset();message=local?"等待平板游戏更新画面":"暂未收到新画面；接收器仍在监听 "+device;paint();
   }},2000);
   return {event};
 })();

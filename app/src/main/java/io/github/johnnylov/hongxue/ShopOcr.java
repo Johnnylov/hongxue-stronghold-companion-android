@@ -21,6 +21,7 @@ final class ShopOcr implements AutoCloseable {
     ShopOcr(Context context) throws Exception {
         try(OrtSession.SessionOptions options=new OrtSession.SessionOptions()){
             options.setIntraOpNumThreads(2);options.setInterOpNumThreads(1);
+            options.setMemoryPatternOptimization(false);options.setCPUArenaAllocator(false);
             detector=open(context,"det.onnx",options);reader=open(context,"rec.onnx",options);
             try(BufferedReader lines=new BufferedReader(new InputStreamReader(context.getAssets().open("recognition/keys.txt"),"UTF-8"))){
                 alphabet.add("");String s;while((s=lines.readLine())!=null)alphabet.add(s);alphabet.add(" ");
@@ -28,10 +29,19 @@ final class ShopOcr implements AutoCloseable {
         }catch(Exception e){close();throw e;}
     }
     private OrtSession open(Context ctx,String name,OrtSession.SessionOptions options) throws Exception {
-        try(InputStream input=ctx.getAssets().open("recognition/"+name); ByteArrayOutputStream bytes=new ByteArrayOutputStream()){
-            byte[] buf=new byte[32768];int size;while((size=input.read(buf))!=-1) bytes.write(buf,0,size);
-            return env.createSession(bytes.toByteArray(),options);
+        // The signed models are compressed APK entries. Feed ORT a file instead of
+        // holding several copies of a 16 MB model in Java while the decoder starts.
+        File cached=new File(ctx.getCodeCacheDir(),"matou-ocr-15c074d-"+name);
+        if(!cached.isFile()){
+            File temp=File.createTempFile("matou-ocr-", ".tmp",ctx.getCodeCacheDir());
+            try{
+                try(InputStream input=ctx.getAssets().open("recognition/"+name);OutputStream out=new FileOutputStream(temp)){
+                    byte[] buf=new byte[32768];int size;while((size=input.read(buf))!=-1)out.write(buf,0,size);
+                }
+                if(!temp.renameTo(cached) && !cached.isFile())throw new IOException("无法缓存识别模型");
+            }finally{if(temp.exists())temp.delete();}
         }
+        return env.createSession(cached.getAbsolutePath(),options);
     }
     public void close(){try{if(reader!=null)reader.close();}catch(Exception ignored){}
         try{if(detector!=null)detector.close();}catch(Exception ignored){}}
@@ -70,7 +80,8 @@ final class ShopOcr implements AutoCloseable {
     }
     private static final class Word {final Rect box;final String text;Word(Rect b,String t){box=b;text=t;}}
     private List<Word> words(Bitmap img,Rect band) throws Exception {
-        float scale=Math.min(1.5f,1280f/band.width());
+        double zoom=band.height()<img.getHeight()*.09?2.75:1.5;
+        float scale=(float)Math.min(Math.min(zoom,1280.0/band.width()),Math.sqrt(210000.0/(band.width()*(double)band.height())));
         int w=Math.max(32,Math.round(band.width()*scale/32)*32),h=Math.max(32,Math.round(band.height()*scale/32)*32);
         float[][] map=detect(img,band,w,h)[0][0];h=map.length;w=map[0].length;
         int[] queue=new int[w*h];List<Rect> boxes=new ArrayList<>();
@@ -119,16 +130,87 @@ final class ShopOcr implements AutoCloseable {
             int v=column?img.getPixel(p,i):img.getPixel(i,p);if((v&255)>22)return false;
         }return true;
     }
+    private static Rect region(Rect s,double l,double t,double r,double b){
+        return new Rect(s.left+(int)(s.width()*l),s.top+(int)(s.height()*t),
+            s.left+(int)(s.width()*r),s.top+(int)(s.height()*b));
+    }
+    // Desktop ShopPurchaseDetector: an empty card reveals a dark background without a card edge.
+    private boolean emptySlot(Bitmap img,Rect screen,int left){
+        int h=screen.height(),right=left+(int)(h*.075),step=Math.max(1,h/540),dy=Math.max(1,h/360);
+        if(left<screen.left || right>=screen.right)return false;
+        int dark=0,total=0;
+        for(int y=screen.top+(int)(h*.84);y<screen.bottom-1;y+=step){
+            int edge=0,n=0;
+            for(int x=left;x<right;x+=step){
+                int p=img.getPixel(x,y),q=img.getPixel(x,Math.min(y+dy,screen.bottom-1));
+                int r=p>>16&255,g=p>>8&255,b=p&255;
+                if(r<85 && g<100 && b<145)dark++;
+                if(Math.abs(r-(q>>16&255))+Math.abs(g-(q>>8&255))+Math.abs(b-(q&255))>90)edge++;
+                total++;n++;
+            }
+            if(edge*2>=n)return false;
+        }
+        return total>0 && dark>total*.92;
+    }
+    private JSONObject matchInfo(Bitmap img,Rect screen,List<Word> top) throws Exception {
+        // In-game information has no opening title. The enemy column is common to both screens.
+        List<Word> right=words(img,region(screen,.66,.34,.99,.58));
+        right.addAll(words(img,region(screen,.66,.565,.99,.85)));
+        right.sort(Comparator.comparingInt(w->w.box.centerY()));
+        if(right.stream().noneMatch(w->w.text.contains("敌方领袖") || w.text.contains("特训敌人")))return null;
+        JSONArray lines=new JSONArray(),modes=new JSONArray(),icons=new JSONArray();
+        for(Word word:right)lines.put(word.text);
+        for(Word word:top)modes.put(word.text);
+        List<InfoGrid> slots=InfoGrid.find(img,screen);
+        for(InfoGrid slot:slots){
+            String name=line(img,slot.label);
+            if(!name.isEmpty())icons.put(new JSONObject().put("text",name).put("banned",slot.banned));
+        }
+        if(!slots.isEmpty())return new JSONObject().put("enemies",lines).put("icons",icons).put("modes",modes);
+        for(int strip=0;strip<2;strip++){
+            List<Word> left=words(img,region(screen,.012,strip==0?.15:.54,.69,strip==0?.55:.94));
+            for(Word word:left){
+                Rect box=word.box;
+                if(word.text.length()>10 || box.width()>screen.width()*.13)continue;
+                int cx=box.centerX(),unit=Math.max(4,(int)(screen.height()*.022));
+                int bright=0,green=0,total=0;
+                for(int y=Math.max(screen.top,box.top-3*unit);y<box.top-unit/2;y+=2){
+                    for(int x=Math.max(screen.left,cx-unit);x<Math.min(screen.right,cx+unit);x+=2){
+                        int color=img.getPixel(x,y),r=color>>16&255,g=color>>8&255,b=color&255;
+                        if(g>90 && g*10>r*13 && g*10>b*13)green++;
+                        if(Math.max(r,Math.max(g,b))>75)bright++;
+                        total++;
+                    }
+                }
+                if(total==0 || bright<total*.09)continue;
+                if(green>total*.15 || green<total*.025){
+                    icons.put(new JSONObject().put("text",word.text).put("banned",green<total*.025));
+                }
+            }
+        }
+        return new JSONObject().put("enemies",lines).put("icons",icons).put("modes",modes);
+    }
     JSONObject read(Bitmap img) throws Exception {
         JSONObject out=new JSONObject();Rect screen=content(img);
         int w=screen.width(),h=screen.height();if(w<1.25*h)return out;
         float s=Math.min(w/1920f,h/1080f);
         List<Word> top=words(img,new Rect(screen.left,screen.top,screen.left+(int)(w*.69),screen.top+(int)(h*.12)));
-        for(Word word:top){
+        List<Word> roundWords=new ArrayList<>(top);
+        if(top.stream().noneMatch(v->ROUND.matcher(v.text).find()))
+            roundWords.addAll(words(img,region(screen,.25,0,.54,.073)));
+        for(Word word:roundWords){
             Matcher m=ROUND.matcher(word.text);
             Integer round=m.find()?number(m.group(1),15):null;
             if(round==null && word.text.endsWith("回合")){
                 round=number(line(img,new Rect(word.box.right,word.box.top,word.box.right+(int)(66*s),word.box.bottom)),15);
+                if(round==null || round==0){
+                    for(Word next:roundWords){
+                        if(next.box.left<=word.box.right || next.box.left-word.box.right>75*s ||
+                            Math.abs(next.box.centerY()-word.box.centerY())>17*s)continue;
+                        Integer candidate=number(next.text,15);
+                        if(candidate!=null && candidate>0){round=candidate;break;}
+                    }
+                }
             }
             if(round!=null && round>=1){out.put("round",round);break;}
         }
@@ -137,7 +219,14 @@ final class ShopOcr implements AutoCloseable {
         for(Word word:bottom){
             if(word.box.centerX()<screen.left+w*.62 && (word.text.contains("升级") || word.text.contains("满级")))button=word;
         }
-        if(button==null)return out;
+        if(button==null){
+            if(!out.has("round"))out.put("info",matchInfo(img,screen,top));
+            return out;
+        }
+        float k=(screen.bottom-button.box.top)/(101f*s)<1.04?s:s*10/9;
+        float pitch=218*k;int cx=button.box.centerX();
+        JSONObject cells=new JSONObject();JSONArray empty=new JSONArray();
+        for(int i=1;i<=6;i++)if(emptySlot(img,screen,Math.round(cx+(i-.31f)*pitch)))empty.put(i);
         for(Word word:bottom){
             if(word.box.centerX()>button.box.right && word.box.centerY()>button.box.centerY()){
                 JSONArray readings=new JSONArray().put(word.text.replaceFirst("^[*×✦✧]+",""));
@@ -147,11 +236,16 @@ final class ShopOcr implements AutoCloseable {
                     inner.left+=Math.round(.82f*inner.height());readings.put(line(img,inner));
                 }
                 labels.put(readings);
+                int slot=Math.round((word.box.centerX()-cx)/pitch);
+                if(slot>=1 && slot<=6){
+                    String key=Integer.toString(slot);JSONArray row=cells.optJSONArray(key);
+                    if(row==null){row=new JSONArray();cells.put(key,row);}row.put(readings);
+                }
             }
         }
-        out.put("shop",labels);
-        float k=(screen.bottom-button.box.top)/(101f*s)<1.04?s:s*10/9;
-        int y=screen.bottom-Math.round(273*k),cx=button.box.centerX();
+        out.put("shop",labels).put("cells",cells).put("empty",empty);
+        out.put("layout",screen.width()+"x"+h+"/"+Math.round((cx-screen.left)/pitch));
+        int y=screen.bottom-Math.round(273*k);
         out.put("money",badge(img,screen.right-Math.round(120*k),y,k,48,20));
         if(button.text.contains("满级"))out.put("terminal",6);
         else{

@@ -31,6 +31,33 @@ public final class MainActivity extends Activity {
     private WebView web;
     private int fileRequest;
     private MirrorReceiver mirror;
+    static java.lang.ref.WeakReference<MainActivity> overlayOwner=new java.lang.ref.WeakReference<>(null);
+    private boolean askingCapture, floating, leftGameWindow;
+    private void askCapture(){
+        android.media.projection.MediaProjectionManager manager=getSystemService(android.media.projection.MediaProjectionManager.class);
+        askingCapture=true;
+        try{startActivityForResult(manager.createScreenCaptureIntent(),83);}
+        catch(RuntimeException e){askingCapture=false;mirrorEvent("error","无法打开系统屏幕共享");}
+    }
+    WebView detachForOverlay(){
+        floating=true;
+        android.view.ViewGroup parent=(android.view.ViewGroup)web.getParent();if(parent!=null)parent.removeView(web);
+        mirrorEvent("local","本机游戏识别已开启");return web;
+    }
+    void finishOverlay(String message){
+        floating=false;leftGameWindow=false;
+        if(!isDestroyed() && !isFinishing()){
+            if(web.getParent()==null)setContentView(web);
+            mirrorEvent("off",message);
+        }
+    }
+    void localFrame(JSONObject data){mirrorEvent("frame",data);}
+    void localStatus(String status){mirrorEvent("status",status);}
+    @Override protected void onResume(){super.onResume();if(floating && leftGameWindow)stopService(new Intent(this,GameOverlay.class));}
+    @Override protected void onDestroy(){
+        if(overlayOwner.get()==this){overlayOwner.clear();stopService(new Intent(this,GameOverlay.class));}
+        super.onDestroy();
+    }
 
     private void mirrorEvent(String event,Object value) {
         String arg=value instanceof JSONObject ? value.toString() : JSONObject.quote(String.valueOf(value));
@@ -41,7 +68,7 @@ public final class MainActivity extends Activity {
         getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         if(old!=null){old.close();mirrorEvent("off","已停止接收");}
     }
-    @Override protected void onStop(){stopMirror();super.onStop();}
+    @Override protected void onStop(){if(floating)leftGameWindow=true;stopMirror();super.onStop();}
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -88,6 +115,17 @@ public final class MainActivity extends Activity {
     }
 
     public final class DeviceActions {
+        @JavascriptInterface public void localGame(){
+            runOnUiThread(()->{
+                if(floating || askingCapture)return;
+                stopMirror();
+                if(android.provider.Settings.canDrawOverlays(MainActivity.this)){askCapture();return;}
+                askingCapture=true;
+                try{startActivityForResult(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:"+getPackageName())),82);}
+                catch(RuntimeException e){askingCapture=false;mirrorEvent("error","请在系统设置允许本应用显示在其他应用上层");}
+            });
+        }
         @JavascriptInterface public void phoneMirror(boolean start) {
             runOnUiThread(()->{
                 if(!start){stopMirror();return;}
@@ -165,6 +203,19 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int request,int result,Intent data) {
         super.onActivityResult(request,result,data);
+        if(request==82){
+            askingCapture=false;
+            if(android.provider.Settings.canDrawOverlays(this))askCapture();
+            else mirrorEvent("error","悬浮窗权限未开启");
+            return;
+        }
+        if(request==83){
+            askingCapture=false;
+            if(result!=RESULT_OK || data==null){mirrorEvent("error","已取消屏幕共享");return;}
+            overlayOwner=new java.lang.ref.WeakReference<>(this);
+            startForegroundService(new Intent(this,GameOverlay.class).putExtra("capture",data));
+            return;
+        }
         if(request!=71 || result!=RESULT_OK || data==null || data.getData()==null)return;
         final Uri uri=data.getData();final int id=fileRequest;
         new Thread(()->{

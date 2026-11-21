@@ -1,14 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.github.johnnylov.hongxue" android:versionCode="11" android:versionName="1.1.0">
+    package="io.github.johnnylov.hongxue" android:versionCode="12" android:versionName="1.2.0">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="34"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <application android:label="马头·卫戍手册" android:icon="@drawable/launcher"
         android:allowBackup="false" android:extractNativeLibs="true" android:usesCleartextTraffic="false"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <activity android:name=".MainActivity" android:exported="true"
+        <service android:name=".GameOverlay" android:exported="false" android:foregroundServiceType="mediaProjection"/>
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
             android:windowSoftInputMode="adjustResize" android:resizeableActivity="true">
             <intent-filter>

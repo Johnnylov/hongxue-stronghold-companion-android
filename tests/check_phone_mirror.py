@@ -22,7 +22,7 @@ with ThreadingHTTPServer(("127.0.0.1",0), functools.partial(Handler,directory=st
     page.locator("nav [data-act=map]").click()
     page.locator("#phone-connect").click()
     panel = page.locator("#phone-panel")
-    panel.get_by_text("开始接收",exact=True).click()
+    panel.get_by_text("接收 iPhone 投屏",exact=True).click()
     page.evaluate("PhoneMirror.event('name','Matou-Test')")
     expect(panel).to_contain_text("Matou-Test")
     frame={"round":5,"terminal":2,"money":9,"upgrade":3,"shop":["蓝毒","蓝毒","不是干员"]}
@@ -46,10 +46,46 @@ with ThreadingHTTPServer(("127.0.0.1",0), functools.partial(Handler,directory=st
     expect(panel).to_contain_text("余额 0")
     receive({})
     expect(shop_button).to_have_count(0)
+    match={"info":{"enemies":["敌方领袖","盐风主教昆图斯","特训敌人·复苏","特训敌人·隐匿","特训敌人·持续"],
+                   "icons":[{"text":"炎","banned":False},{"text":"谢拉格","banned":True}],
+                   "modes":["绝境模拟"]}}
+    receive(match)
+    assert page.evaluate("db.run.boss") != "盐风主教昆图斯"
+    receive(match)
+    expect(panel).to_contain_text("盐风主教昆图斯")
+    assert page.evaluate("[db.run.boss,db.run.mode,db.run.enemyTypes.sort(),db.run.bannedBonds]")==[
+        "盐风主教昆图斯","mode_multi_hard",["DOT","INVISIBLE","REBORN"],["谢拉格"]]
+    assert page.evaluate("db.run.counts['蓝毒']") == 1
+    partial={"info":{"enemies":["特训敌人·复苏"],"icons":[],"modes":[]}}
+    receive(partial)
+    receive(partial)
+    assert page.evaluate("db.run.enemyTypes.length===3 && db.run.bannedBonds.includes('谢拉格')")
+    page.evaluate("PhoneMirror.event('packet',true)")
+    page.evaluate("PhoneMirror.event('reset','1')")
+    expect(panel).to_contain_text("连接已中断")
+    page.evaluate("PhoneMirror.event('stream','true')")
+    receive(frame)
+    receive(frame)
+    card={**frame,"cells":{"1":[["拉普兰德"]],"2":[["烈夏"]]},"layout":"1920x1080/3","empty":[]}
+    bought={**card,"cells":{"2":[["烈夏"]]},"empty":[1],"money":8}
+    receive(card);receive(card)
+    receive(bought)
+    assert not page.evaluate("db.run.counts['拉普兰德']")
+    receive(bought);receive(bought)
+    assert page.evaluate("db.run.counts['拉普兰德']")==1
+    receive(card);receive(card)
+    refresh={**bought,"cells":{"1":[["砾"]],"2":[["烈夏"]]},"empty":[]}
+    receive(refresh);receive(refresh)
+    assert page.evaluate("db.run.counts['拉普兰德']")==1
+    card["shop"]=["拉普兰德","烈夏"]
+    receive(card);receive(card)
+    panel.get_by_role("button",name="拿了拉普兰德 ＋1").click()
+    receive(bought);receive(bought)
+    assert page.evaluate("db.run.counts['拉普兰德']")==2
     panel.get_by_text("断开 iPhone").click()
     receive(frame)
     receive(frame)
-    assert page.evaluate("db.run.money") == 0
+    assert page.evaluate("db.run.money") == 8
     browser.close()
     server.shutdown()
 print("Passed mirror connection, two-frame HUD, zero funds, confirmed purchases, folding and disconnect.")
