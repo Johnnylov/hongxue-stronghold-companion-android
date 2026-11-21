@@ -1,0 +1,83 @@
+/* Shared surfaces, controls and type scale across the handbook and game view. */
+:root {
+  --control-radius: 9px;
+  --panel-radius: 14px;
+  --field-height: 44px;
+  --header-height: 62px;
+}
+html[data-skin] {color-scheme:light}
+html[data-dark="1"] {color-scheme:dark}
+body {font-family:Roboto,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
+html[data-skin] header {height:var(--header-height);gap:clamp(10px,1.7vw,24px);padding-inline:clamp(12px,2vw,28px)}
+.brand {flex:none;gap:9px;white-space:nowrap}
+.brand strong {font-size:18px;letter-spacing:.015em}
+nav {min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:none;gap:3px}
+nav::-webkit-scrollbar {display:none}
+nav button {flex:none;white-space:nowrap;border-radius:var(--control-radius);padding-inline:12px;min-height:40px;font-weight:600}
+#phone-connect {margin-inline-start:auto;border:1px solid var(--title-muted);color:var(--title-text);border-radius:var(--control-radius);min-height:40px;padding:4px 12px;flex:none}
+header .about {margin:0;width:36px;flex:none;color:var(--title-muted)}
+main {min-height:calc(100vh - var(--header-height))}
+html[data-skin] #basket {background:var(--section);min-height:calc(100vh - var(--header-height))}
+h1,h2,h3,.topline strong {color:var(--ink)}
+h1 {font-size:clamp(25px,2.4vw,34px);letter-spacing:-.025em}
+h2 {letter-spacing:-.015em}
+.topline {align-items:center;gap:12px}
+.sectionhead {margin:20px 0 10px}
+.sectionhead h3 {font-size:16px;line-height:1.45}
+html[data-skin] :is(.btn,.btn.gold,.chip,.search,.input,.compact-select),html[data-skin] select {
+  border-radius:var(--control-radius);
+}
+html[data-skin] .btn {font-weight:650}
+html[data-skin] .btn.light {background:var(--paper);color:var(--ink);border:1px solid var(--edge)}
+html[data-skin] .search {min-height:var(--field-height);background:var(--paper);border:1px solid var(--edge)}
+html[data-skin] :is(.tracking-tabs,.segments,.tabrow) {
+  background:var(--section);border:1px solid var(--edge);border-radius:11px;padding:3px;gap:3px;
+}
+html[data-skin] :is(.tracking-tabs,.segments,.tabrow) button {border-radius:7px;font-weight:600}
+html[data-skin] :is(.tracking-tabs,.segments,.tabrow) button.chosen {background:var(--accent);color:var(--on-accent)}
+html[data-skin] :is(.guidecard,.paper,.listbox,.equipment-card,.map-head,.board-panel,.next-step,.route-stage-card,.level-advice,.match-choice,.ws-inspector,dialog) {
+  border-radius:var(--panel-radius);border-color:var(--edge);background-color:var(--paper);
+}
+html[data-skin] :is(.unit,.deploy-card,.plan-member,.eco-card) {border-radius:var(--control-radius)}
+.guidecard {align-items:stretch;overflow:hidden}
+.guidecard .cover {height:96px;gap:0;align-items:flex-end;justify-content:center;border:0;border-bottom:1px solid var(--line);background:linear-gradient(110deg,var(--section),var(--tint))}
+.guidecard .cover img {height:91%;max-width:33%;object-fit:contain;margin:0 -2%;filter:none}
+.guidecard .cardbody {padding:13px 14px 8px}
+.guidecard .cardbody h3 {font-size:17px;line-height:1.4}
+.guidecard .cardfooter {margin:0 14px;padding:9px 0 11px;width:auto;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
+.guidecard .cardfooter span:first-child {color:var(--muted);font-weight:500}
+.listbox .listrow {background:var(--paper);padding-block:11px}
+.listrow .arrow {color:var(--teal)}
+.next-step .round-action,#phone-panel .mirror-decision {background:var(--tint);color:var(--ink);border-inline-start:3px solid var(--accent);border-radius:var(--control-radius);padding:8px 10px;line-height:1.45}
+.board-shell .board-cols,.board-shell .board-rows {color:var(--muted);font-variant-numeric:tabular-nums}
+.board-shell .tile-name {color:var(--ink);line-height:1.15}
+.map-solve-row #map-mode-status {color:var(--muted)}
+#phone-panel {background:var(--paper);border:1px solid var(--edge);border-radius:var(--panel-radius);padding:14px;color:var(--ink)}
+#phone-panel .mirror-head {border-bottom:1px solid var(--line);padding-bottom:5px}
+#phone-panel .mirror-status {color:var(--muted);font-size:13px;line-height:1.45}
+.match-metrics {display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:3px;margin:8px 0;padding:6px 0;background:var(--section);border-radius:var(--control-radius)}
+.match-metrics>div {padding:0 7px;border-inline-start:1px solid var(--edge)}
+.match-metrics>div:first-child {border:0}
+.match-metrics dt,.match-metrics dd small {font-size:12px;font-weight:500;color:var(--muted)}
+.match-metrics dd {margin:1px 0 0;color:var(--ink);font-size:17px;line-height:1.25;font-weight:700;font-variant-numeric:tabular-nums}
+.match-metrics dd small {display:block}
+.mirror-actions {display:flex;flex-wrap:wrap;gap:8px}
+.mirror-actions .btn {flex:1;white-space:nowrap}
+#phone-panel .mirror-shop:empty {display:none}
+#phone-panel .mirror-shop:not(:empty) {margin:6px 0}
+body.local-game:not(.overlay-library) #phone-panel {border:0;border-radius:0;padding:8px 10px}
+body.overlay-board .board-panel,body.overlay-board .map-head {border-radius:10px}
+@media(max-width:760px){
+  :root {--header-height:88px}
+  html[data-skin] header {display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:2px 8px;padding:5px 10px 6px;height:auto}
+  header nav {grid-column:1/-1;grid-row:2;overflow-x:auto;width:100%;height:auto}
+  header nav button {flex:1 0 auto;min-height:36px;height:auto;padding:5px 8px}
+  header .brand {grid-column:1;grid-row:1}
+  #phone-connect {grid-column:2;grid-row:1;min-height:34px}
+  header .about {grid-column:3;grid-row:1;height:36px}
+  html[data-skin] #basket {min-height:0}
+}
+@media(hover:hover){
+  .guidecard:hover,.listrow:hover,.unit:hover {box-shadow:inset 0 0 0 1px var(--accent)}
+}

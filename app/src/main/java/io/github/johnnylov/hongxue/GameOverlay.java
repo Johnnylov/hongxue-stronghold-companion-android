@@ -3,6 +3,9 @@ package io.github.johnnylov.hongxue;
 import android.app.*;
 import android.content.*;
 import android.content.res.Configuration;
+import android.content.res.ColorStateList;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.graphics.*;
 import android.hardware.display.*;
 import android.media.Image;
@@ -27,7 +30,43 @@ public final class GameOverlay extends Service {
     private Handler capture;
     private WindowManager wm;
     private WindowManager.LayoutParams layout;
-    private LinearLayout window;
+    private LinearLayout window, bar;
+    static final class Palette {
+        final int bar, title, muted, accent, onAccent, paper;
+        Palette() {
+            bar=0xff251e3e; title=0xfff4f1ff; muted=0xffb9b0d6;
+            accent=0xff6a52d9; onAccent=Color.WHITE; paper=Color.WHITE;
+        }
+        Palette(JSONObject colors) throws org.json.JSONException {
+            bar=Color.parseColor(colors.getString("title-bg"));
+            title=Color.parseColor(colors.getString("title-text"));
+            muted=Color.parseColor(colors.getString("title-muted"));
+            accent=Color.parseColor(colors.getString("accent"));
+            onAccent=Color.parseColor(colors.getString("on-accent"));
+            paper=Color.parseColor(colors.getString("paper"));
+        }
+    }
+    private GradientDrawable surface(int color, int radius) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setColor(color);
+        shape.setCornerRadius(dp(radius));
+        return shape;
+    }
+    void applyPalette() {
+        Palette colors = owner.palette;
+        window.setBackground(surface(folded ? colors.bar : colors.paper, 12));
+        bar.setBackgroundColor(colors.bar);
+        handle.setTextColor(colors.title);
+        for (Button b : new Button[]{advice,board,guide,stop}) {
+            boolean chosen = b==advice && page==Page.ADVICE || b==board && page==Page.BOARD || b==guide && page==Page.GUIDE;
+            int ink = chosen ? colors.onAccent : colors.muted;
+            b.setSelected(chosen);
+            b.setTextColor(ink);
+            b.setTypeface(null, chosen ? Typeface.BOLD : Typeface.NORMAL);
+            b.setBackground(new RippleDrawable(ColorStateList.valueOf((ink & 0xffffff) | 0x33000000),
+                surface(chosen ? colors.accent : Color.TRANSPARENT, 8), surface(Color.WHITE, 8)));
+        }
+    }
     private TextView handle;
     private Button advice,board,guide,stop;
     private WebView web;
@@ -80,9 +119,9 @@ public final class GameOverlay extends Service {
         return START_NOT_STICKY;
     }
     private void showWindow(){
-        window=new LinearLayout(this);window.setOrientation(LinearLayout.VERTICAL);window.setBackgroundColor(0xfff6f4fa);
-        LinearLayout bar=new LinearLayout(this);bar.setBackgroundColor(0xff332e51);window.addView(bar);
-        handle=new TextView(this);handle.setTextColor(-1);handle.setGravity(Gravity.CENTER);handle.setPadding(dp(10),0,dp(10),0);
+        window=new LinearLayout(this);window.setOrientation(LinearLayout.VERTICAL);window.setClipToOutline(true);
+        bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);window.addView(bar);
+        handle=new TextView(this);handle.setTypeface(null,Typeface.BOLD);handle.setGravity(Gravity.CENTER);handle.setPadding(dp(10),0,dp(10),0);
         bar.addView(handle,new LinearLayout.LayoutParams(-2,dp(40)));
         advice=barButton(bar,"建议",v->select(Page.ADVICE));
         board=barButton(bar,"站位",v->select(Page.BOARD));
@@ -102,7 +141,7 @@ public final class GameOverlay extends Service {
                 default:return true;
                 }
             }});
-        web=owner.detachForOverlay();window.addView(web,new LinearLayout.LayoutParams(-1,0,1));
+        web=owner.detachForOverlay(this);window.addView(web,new LinearLayout.LayoutParams(-1,0,1));
         layout=new WindowManager.LayoutParams(-2,-2,WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE|WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL|
             WindowManager.LayoutParams.FLAG_SECURE,PixelFormat.TRANSLUCENT);
@@ -112,7 +151,12 @@ public final class GameOverlay extends Service {
     private Button barButton(LinearLayout bar,String name,View.OnClickListener action){
         Button button=new Button(this);button.setText(name);button.setSingleLine();
         button.setMinWidth(0);button.setMinimumWidth(0);button.setPadding(dp(3),0,dp(3),0);
-        button.setOnClickListener(action);bar.addView(button,new LinearLayout.LayoutParams(0,dp(40),1));return button;
+        button.setAllCaps(false);button.setStateListAnimator(null);
+        button.setOnClickListener(action);
+        LinearLayout.LayoutParams cell = new LinearLayout.LayoutParams(0,dp(40),1);
+        cell.setMargins(dp(2),0,dp(2),0);
+        bar.addView(button,cell);
+        return button;
     }
     private void select(Page value){
         if(page==value)return;
@@ -128,9 +172,8 @@ public final class GameOverlay extends Service {
         DisplayMetrics m=getResources().getDisplayMetrics();handle.setText(folded?"马头 ▸":"马头 ▾");
         for(Button b:new Button[]{advice,board,guide,stop}){
             b.setVisibility(folded?View.GONE:View.VISIBLE);
-            boolean chosen=b==advice && page==Page.ADVICE || b==board && page==Page.BOARD || b==guide && page==Page.GUIDE;
-            b.setSelected(chosen);b.setTextColor(chosen?0xff5035af:0xff292430);b.setTypeface(null,chosen?Typeface.BOLD:Typeface.NORMAL);
         }
+        applyPalette();
         web.setVisibility(folded?View.GONE:View.VISIBLE);
         layout.width=folded?dp(74):Math.min(m.widthPixels,page==Page.ADVICE?dp(350):Math.min((int)(m.widthPixels*.93),page==Page.BOARD?dp(670):m.widthPixels));
         layout.height=folded?dp(40):Math.min((int)(m.heightPixels*.90),page==Page.ADVICE?dp(240):m.heightPixels);

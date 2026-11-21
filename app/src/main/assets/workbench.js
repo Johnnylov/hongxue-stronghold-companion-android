@@ -93,12 +93,14 @@ const Workbench = (() => {
     document.documentElement.dataset.dark = db.prefs.dark ? "1" : "0";
     document.documentElement.dataset.skin = db.prefs.skin;
     document.body.style.zoom = String(db.prefs.zoom / 100);
-    const color = getComputedStyle(document.documentElement)
-      .getPropertyValue("--title-bg")
-      .trim()
-      .slice(0, 7);
-    if (window.Tablet?.chromeColor && /^#[0-9a-f]{6}$/i.test(color))
-      Tablet.chromeColor(color);
+    const styles = getComputedStyle(document.documentElement);
+    const color = name => styles.getPropertyValue("--" + name).trim().slice(0, 7);
+    if (window.Tablet?.interfaceTheme) {
+      const tokens = ["title-bg", "title-text", "title-muted", "accent", "on-accent", "paper"];
+      Tablet.interfaceTheme(JSON.stringify(Object.fromEntries(tokens.map(name => [name, color(name)]))));
+    } else if (window.Tablet?.chromeColor) {
+      Tablet.chromeColor(color("title-bg"));
+    }
   }
   function engineWorker() {
     let worker, seq = 0;

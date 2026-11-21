@@ -39,13 +39,16 @@ public final class MainActivity extends Activity {
         try{startActivityForResult(manager.createScreenCaptureIntent(),83);}
         catch(RuntimeException e){askingCapture=false;mirrorEvent("error","无法打开系统屏幕共享");}
     }
-    WebView detachForOverlay(){
+    GameOverlay.Palette palette = new GameOverlay.Palette();
+    private GameOverlay activeOverlay;
+    WebView detachForOverlay(GameOverlay overlay){
+        activeOverlay = overlay;
         floating=true;
         android.view.ViewGroup parent=(android.view.ViewGroup)web.getParent();if(parent!=null)parent.removeView(web);
         mirrorEvent("local","本机游戏识别已开启");return web;
     }
     void finishOverlay(String message){
-        floating=false;leftGameWindow=false;
+        activeOverlay=null;floating=false;leftGameWindow=false;
         if(!isDestroyed() && !isFinishing()){
             if(web.getParent()==null)setContentView(web);
             mirrorEvent("off",message);
@@ -139,6 +142,22 @@ public final class MainActivity extends Activity {
                     mirror.start();
                     getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 }catch(Exception | LinkageError e){stopMirror();mirrorEvent("error","无法启动接收："+e.getMessage());}
+            });
+        }
+        @JavascriptInterface public void interfaceTheme(String json) {
+            final GameOverlay.Palette selected;
+            try { selected = new GameOverlay.Palette(new JSONObject(json)); }
+            catch (org.json.JSONException | IllegalArgumentException invalid) { return; }
+            runOnUiThread(() -> {
+                palette = selected;
+                getWindow().setStatusBarColor(selected.bar);
+                getWindow().setNavigationBarColor(selected.bar);
+                android.view.View decor = getWindow().getDecorView();
+                int lightIcons = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                int flags = decor.getSystemUiVisibility();
+                decor.setSystemUiVisibility(Color.luminance(selected.bar) > .45f ? flags | lightIcons : flags & ~lightIcons);
+                if (activeOverlay != null) activeOverlay.applyPalette();
             });
         }
         @JavascriptInterface public void chromeColor(String color) {

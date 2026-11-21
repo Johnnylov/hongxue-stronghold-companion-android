@@ -26,18 +26,24 @@ const PhoneMirror=(()=>{
   }
   let local=false,receipt="";
   function show(html){if(html!==painted){panel.innerHTML=html;painted=html;}}
+  function metric(label,value,recorded){
+    return '<div><dt>'+label+'</dt> <dd>'+esc(value)+(recorded?'<small>记录</small>':'')+'</dd></div>';
+  }
   function paint(){
     panel.classList.toggle("folded",folded);
     if(folded){show('<button class="btn light" data-m="expand">iPhone · '+esc(seen?"本局建议":"投屏连接")+'</button>');return;}
     const head=local?'':'<div class="mirror-head"><b>游戏连接</b><button class="linkbtn" data-m="fold">收起</button></div>';
-    const help=device?'iPhone 控制中心 → 屏幕镜像 → '+device:'两台设备连接同一 Wi-Fi，在平板前台接收。';
-    show(head+'<p>'+esc(message || help)+'</p>'+
+    const help=device?'iPhone 控制中心 → 屏幕镜像 → '+device:'在平板本机玩，或连接同一 Wi-Fi 下的 iPhone。';
+    const run=db.run;
+    const stats=seen?'<dl class="match-metrics">'+metric("回合",run.round+" / 15",confirmed.round!==run.round)+metric("终端",run.terminal+" 本",confirmed.terminal!==run.terminal)+
+      metric("余额",run.money??"待确认",run.money!=null && confirmed.money!==run.money)+(run.terminal<6 && confirmed.upgrade!=null?metric("升本需",confirmed.upgrade,false):"")+'</dl>':'';
+    show(head+'<p class="mirror-status">'+esc(message || help)+'</p>'+
       (running && device && !seen && !lastFrame && !lastPacket?'<p>'+esc(help)+'</p>':'')+
       (pin?'<p><b>配对码 '+esc(pin)+'</b></p>':'')+(receipt?'<p>'+esc(receipt)+'</p>':'')+
-      (seen?'<p>第 '+db.run.round+' 回合'+(confirmed.round===db.run.round?'':'（记录）')+' · '+db.run.terminal+' 本'+(confirmed.terminal===db.run.terminal?'':'（记录）')+' · '+(db.run.money==null?'余额待确认':'余额 '+db.run.money+(confirmed.money===db.run.money?'':'（记录）'))+(db.run.terminal<6 && confirmed.upgrade!=null?' · 升本需 '+confirmed.upgrade:'')+'</p><p><b>'+esc(advice || "正在按当前阵容计算")+'</b></p>':'')+
+      stats+(seen?'<p class="mirror-decision"><b>'+esc(advice || "正在按当前阵容计算")+'</b></p>':'')+
       '<div class="mirror-shop">'+shop.map(n=>catalogue["op:"+n]?'<button class="btn light" data-unit-buy="'+esc(n)+'">拿了'+esc(n)+' ＋1</button>':'<span>'+esc(n)+'</span>').join("")+'</div>'+
-      (local?'':(running?'':'<button class="btn" data-m="local">本机游戏悬浮窗</button>')+
-      '<button class="linkbtn" data-m="'+(running?'stop':'start')+'">'+(running?'断开 iPhone':'接收 iPhone 投屏')+'</button>'));
+      (local?'':'<div class="mirror-actions">'+(running?'':'<button class="btn" data-m="local">本机游戏悬浮窗</button>')+
+      '<button class="btn light" data-m="'+(running?'stop':'start')+'">'+(running?'断开 iPhone':'接收 iPhone 投屏')+'</button></div>'));
   }
   async function recommend(){
     const req=Planning.payload("auto"), key=JSON.stringify([req,shop]);

@@ -17,11 +17,25 @@ with ThreadingHTTPServer(("127.0.0.1",0), functools.partial(Handler,directory=st
     browser = pw.chromium.launch(executable_path=os.environ.get("CHROME_PATH"),
                                  args=[f"--explicitly-allowed-ports={server.server_port}"])
     page = browser.new_page()
-    page.add_init_script("window.Tablet={phoneMirror:start=>{if(!start)PhoneMirror.event('off','已停止接收')}}")
+    page.add_init_script("""window.Tablet={
+        interfaceTheme:json=>{window.nativePalette=JSON.parse(json)},
+        phoneMirror:start=>{if(!start)PhoneMirror.event('off','已停止接收')}
+    }""")
     page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
     page.locator("nav [data-act=map]").click()
     page.locator("#phone-connect").click()
     panel = page.locator("#phone-panel")
+    for skin in ("closure","terminal","ursus"):
+        for dark in (True,False):
+            colors=page.evaluate("""([skin,dark])=>{
+                Object.assign(db.prefs,{skin,dark}); Workbench.applyTheme();
+                return [nativePalette,getComputedStyle(document.getElementById('phone-panel')).backgroundColor];
+            }""",[skin,dark])
+            palette,background=colors
+            paper=tuple(bytes.fromhex(palette["paper"][1:]))
+            assert background=="rgb(%d, %d, %d)"%paper
+            assert palette["accent"]!=palette["on-accent"]
+    page.evaluate("Object.assign(db.prefs,{skin:'closure',dark:false}); Workbench.applyTheme()")
     panel.get_by_text("接收 iPhone 投屏",exact=True).click()
     page.evaluate("PhoneMirror.event('name','Matou-Test')")
     expect(panel).to_contain_text("Matou-Test")
